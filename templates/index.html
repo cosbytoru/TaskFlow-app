@@ -1,0 +1,110 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ToDo App - Modern UI</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-slate-100 text-slate-800">
+    <!-- ヘッダーを追加 -->
+    <header class="bg-white shadow-md">
+        <nav class="container mx-auto px-6 py-3 flex justify-between items-center">
+            <div class="text-lg font-bold">ToDo App</div>
+            <div>
+                {% if current_user.is_authenticated %}
+                    <span class="mr-4">ようこそ, {{ current_user.username }} さん</span>
+                    <a href="{{ url_for('logout') }}" class="text-red-500 hover:text-red-700">ログアウト</a>
+                {% endif %}
+            </div>
+        </nav>
+    </header>
+
+    <div class="container mx-auto mt-10 max-w-2xl">
+        <h1 class="text-4xl font-bold text-center mb-8">My ToDo List</h1>
+
+        <!-- フラッシュメッセージ表示エリア -->
+        {% with messages = get_flashed_messages(with_categories=true) %}
+          {% if messages %}
+            <div class="mb-4">
+              {% for category, message in messages %}
+                <div class="p-4 rounded-lg 
+                  {% if category == 'success' %} bg-green-100 text-green-800 
+                  {% elif category == 'danger' %} bg-red-100 text-red-800
+                  {% else %} bg-blue-100 text-blue-800 {% endif %}"
+                  role="alert">
+                  {{ message }}
+                </div>
+              {% endfor %}
+            </div>
+          {% endif %}
+        {% endwith %}
+
+        <!-- タスク追加フォーム -->
+        <div class="bg-white p-6 rounded-lg shadow-md mb-8">
+            <form action="{{ url_for('add_task') }}" method="post" class="flex gap-4">
+                <input 
+                    type="text" 
+                    name="title" 
+                    placeholder="新しいタスクを追加..." 
+                    required
+                    class="flex-grow p-3 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-sky-500 transition"
+                >
+                <button 
+                    type="submit"
+                    class="bg-sky-500 hover:bg-sky-600 text-white font-bold py-3 px-6 rounded-lg transition"
+                >
+                    追加
+                </button>
+            </form>
+        </div>
+
+        <!-- タスク一覧 -->
+        <div class="bg-white rounded-lg shadow-md">
+            <ul class="divide-y divide-slate-200">
+                {% for task in tasks %}
+                    <li class="p-4 flex items-center justify-between">
+                        <div class="flex items-center">
+                            {% if not task.completed %}
+                                <a href="{{ url_for('complete_task', task_id=task.id) }}" class="mr-4 text-2xl">
+                                    <div class="w-7 h-7 border-2 border-slate-300 rounded-md hover:bg-green-100 transition"></div>
+                                </a>
+                                <span class="text-lg">{{ task.title }}</span>
+                            {% else %}
+                                <a href="{{ url_for('reactivate_task', task_id=task.id) }}" class="mr-4 text-2xl text-slate-400 hover:text-sky-500 transition">
+                                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="w-7 h-7">
+                                      <path fill-rule="evenodd" d="M9.53 2.47a.75.75 0 0 1 0 1.06L4.81 8.25H15a6.75 6.75 0 0 1 0 13.5h-3a.75.75 0 0 1 0-1.5h3a5.25 5.25 0 1 0 0-10.5H4.81l4.72 4.72a.75.75 0 1 1-1.06 1.06l-6-6a.75.75 0 0 1 0-1.06l6-6a.75.75 0 0 1 1.06 0Z" clip-rule="evenodd" />
+                                    </svg>
+                                </a>
+                                <span class="text-lg text-slate-400 line-through">{{ task.title }}</span>
+                            {% endif %}
+                        </div>
+                        <div class="flex items-center gap-4">
+                            <span class="text-xs text-slate-400">ID: {{ task.id }}</span>
+                            <div class="flex items-center gap-2">
+                                <a href="{{ url_for('edit_task', task_id=task.id) }}" class="text-slate-400 hover:text-blue-500 transition">
+                                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="w-6 h-6">
+                                        <path d="M21.731 2.269a2.625 2.625 0 0 0-3.712 0l-1.157 1.157 3.712 3.712 1.157-1.157a2.625 2.625 0 0 0 0-3.712ZM19.513 8.199l-3.712-3.712-8.4 8.4a5.25 5.25 0 0 0-1.32 2.214l-.8 2.685a.75.75 0 0 0 .933.933l2.685-.8a5.25 5.25 0 0 0 2.214-1.32l8.4-8.4Z" />
+                                        <path d="M5.25 5.25a3 3 0 0 0-3 3v10.5a3 3 0 0 0 3 3h10.5a3 3 0 0 0 3-3V13.5a.75.75 0 0 0-1.5 0v5.25a1.5 1.5 0 0 1-1.5 1.5H5.25a1.5 1.5 0 0 1-1.5-1.5V8.25a1.5 1.5 0 0 1 1.5-1.5h5.25a.75.75 0 0 0 0-1.5H5.25Z" />
+                                    </svg>
+                                </a>
+                                <a href="{{ url_for('delete_task', task_id=task.id) }}" class="text-slate-400 hover:text-red-500 transition">
+                                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="w-6 h-6">
+                                        <path fill-rule="evenodd" d="M16.5 4.478v.227a48.816 48.816 0 0 1 3.878.512.75.75 0 1 1-.256 1.478l-.209-.035-1.005 13.006a.75.75 0 0 1-.749.684H7.08a.75.75 0 0 1-.749-.684L5.33 6.63a.75.75 0 0 1-.256-1.478A48.567 48.567 0 0 1 9 4.705v-.227c0-1.564 1.213-2.9 2.816-2.9h.368c1.603 0 2.816 1.336 2.816 2.9ZM12 6.25a.75.75 0 0 1 .75.75v8.5a.75.75 0 0 1-1.5 0v-8.5a.75.75 0 0 1 .75-.75Z" clip-rule="evenodd" />
+                                    </svg>
+                                </a>
+                            </div>
+                        </div>
+                    </li>
+                {% else %}
+                    <li class="p-4 text-center text-slate-500">タスクはありません。</li>
+                {% endfor %}
+            </ul>
+        </div>
+        
+        <footer class="text-center mt-8 text-slate-500 text-sm">
+            <p>Powered by Flask, Docker & Tailwind CSS</p>
+        </footer>
+    </div>
+</body>
+</html>

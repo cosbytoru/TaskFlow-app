@@ -1,0 +1,37 @@
+# ワークフローの名前
+name: Python CI
+
+# このワークフローが実行されるタイミング
+on:
+  # mainブランチにpushされた時
+  push:
+    branches: [ "main" ]
+  # mainブランチに対するプルリクエストが作成された時
+  pull_request:
+    branches: [ "main" ]
+
+# 実行される一連の「仕事（ジョブ）」を定義
+jobs:
+  # ジョブの名前（ここではlinter-and-builderと命名）
+  linter-and-builder:
+    # このジョブを実行する仮想マシンの種類
+    runs-on: ubuntu-latest
+
+    # ジョブが実行する一連の「手順（ステップ）」
+    steps:
+    # 1. リポジトリのコードをチェックアウトする
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    # 2. Docker Composeでイメージのビルドが成功するかテストする
+    # このステップでDockerfileの文法やCOPY漏れなどを検知できる
+    # また、requirements.txtが実行され、flake8もインストールされる
+    - name: Test Docker Compose build
+      run: |
+        docker compose build
+
+    # 3. ビルドしたコンテナ内でflake8を実行し、コードをチェックする
+    # これにより、ローカルでのチェックと同じ環境で静的解析が行われる
+    - name: Lint with flake8
+      run: |
+        docker compose run --rm web flake8 .
