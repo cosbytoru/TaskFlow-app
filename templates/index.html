@@ -25,7 +25,7 @@
 
         <!-- フラッシュメッセージ表示エリア -->
         {% with messages = get_flashed_messages(with_categories=true) %}
-          {% if messages %}
+          <div id="flashMessages" class="mb-4"> {# IDを追加 #}
             <div class="mb-4">
               {% for category, message in messages %}
                 <div class="p-4 rounded-lg 
@@ -37,50 +37,86 @@
                 </div>
               {% endfor %}
             </div>
-          {% endif %}
+          </div>
         {% endwith %}
 
         <!-- タスク追加フォーム -->
         <div class="bg-white p-6 rounded-lg shadow-md mb-8">
-            <form action="{{ url_for('add_task') }}" method="post" class="flex gap-4">
-                <input 
-                    type="text" 
-                    name="title" 
-                    placeholder="新しいタスクを追加..." 
-                    required
-                    class="flex-grow p-3 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-sky-500 transition"
-                >
-                <button 
-                    type="submit"
-                    class="bg-sky-500 hover:bg-sky-600 text-white font-bold py-3 px-6 rounded-lg transition"
-                >
-                    追加
-                </button>
+            <form id="addTaskForm" action="{{ url_for('add_task') }}" method="post" class="space-y-4"> {# IDを追加 #}
+                <div>
+                    <input 
+                        type="text" 
+                        name="title" 
+                        placeholder="新しいタスクを追加..." 
+                        required
+                        class="w-full p-3 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-sky-500 transition"
+                    >
+                </div>
+                <div class="flex flex-col sm:flex-row gap-4">
+                    <div class="flex-grow">
+                        <label for="due_date" class="block text-sm font-medium text-slate-700 mb-1">期限日</label>
+                        <input 
+                            type="date" 
+                            name="due_date" 
+                            id="due_date"
+                            class="w-full p-3 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-sky-500 transition"
+                        >
+                    </div>
+                    <div class="flex-grow">
+                        <label for="priority" class="block text-sm font-medium text-slate-700 mb-1">優先度</label>
+                        <select name="priority" id="priority" class="w-full p-3 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-sky-500 transition">
+                            <option value="1">低</option>
+                            <option value="2" selected>中</option>
+                            <option value="3">高</option>
+                        </select>
+                    </div>
+                </div>
+                <div>
+                    <button 
+                        type="submit"
+                        class="w-full bg-sky-500 hover:bg-sky-600 text-white font-bold py-3 px-6 rounded-lg transition"
+                    >追加</button>
+                </div>
             </form>
         </div>
 
         <!-- タスク一覧 -->
         <div class="bg-white rounded-lg shadow-md">
-            <ul class="divide-y divide-slate-200">
+            <ul id="taskList" class="divide-y divide-slate-200"> {# IDを追加 #}
                 {% for task in tasks %}
-                    <li class="p-4 flex items-center justify-between">
-                        <div class="flex items-center">
-                            {% if not task.completed %}
-                                <a href="{{ url_for('complete_task', task_id=task.id) }}" class="mr-4 text-2xl">
-                                    <div class="w-7 h-7 border-2 border-slate-300 rounded-md hover:bg-green-100 transition"></div>
-                                </a>
-                                <span class="text-lg">{{ task.title }}</span>
-                            {% else %}
-                                <a href="{{ url_for('reactivate_task', task_id=task.id) }}" class="mr-4 text-2xl text-slate-400 hover:text-sky-500 transition">
-                                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="w-7 h-7">
-                                      <path fill-rule="evenodd" d="M9.53 2.47a.75.75 0 0 1 0 1.06L4.81 8.25H15a6.75 6.75 0 0 1 0 13.5h-3a.75.75 0 0 1 0-1.5h3a5.25 5.25 0 1 0 0-10.5H4.81l4.72 4.72a.75.75 0 1 1-1.06 1.06l-6-6a.75.75 0 0 1 0-1.06l6-6a.75.75 0 0 1 1.06 0Z" clip-rule="evenodd" />
-                                    </svg>
-                                </a>
-                                <span class="text-lg text-slate-400 line-through">{{ task.title }}</span>
-                            {% endif %}
+                    <li class="p-4 flex items-center justify-between" data-task-id="{{ task.id }}">
+                        <div class="flex-grow">
+                            <div class="flex items-center">
+                                {% if not task.completed %}
+                                    <a href="{{ url_for('complete_task', task_id=task.id) }}" class="mr-3 text-2xl complete-task-btn"> {# クラス追加 #}
+                                        <div class="w-6 h-6 border-2 border-slate-300 rounded-md hover:bg-green-100 transition"></div>
+                                    </a>
+                                    <span class="text-lg">{{ task.title }}</span>
+                                {% else %}
+                                    <a href="{{ url_for('reactivate_task', task_id=task.id) }}" class="mr-3 text-2xl text-slate-400 hover:text-sky-500 transition reactivate-task-btn"> {# クラス追加 #}
+                                        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="w-6 h-6">
+                                          <path fill-rule="evenodd" d="M9.53 2.47a.75.75 0 0 1 0 1.06L4.81 8.25H15a6.75 6.75 0 0 1 0 13.5h-3a.75.75 0 0 1 0-1.5h3a5.25 5.25 0 1 0 0-10.5H4.81l4.72 4.72a.75.75 0 1 1-1.06 1.06l-6-6a.75.75 0 0 1 0-1.06l6-6a.75.75 0 0 1 1.06 0Z" clip-rule="evenodd" />
+                                        </svg>
+                                    </a>
+                                    <span class="text-lg text-slate-400 line-through">{{ task.title }}</span>
+                                {% endif %}
+                            </div>
+                            <div class="text-xs text-slate-500 mt-1 ml-9">
+                                {% if task.due_date %}
+                                    <span>期限: {{ task.due_date.strftime('%Y-%m-%d') }}</span>
+                                {% endif %}
+                                {% if task.priority %}
+                                    <span class="ml-2">優先度: 
+                                        {% if task.priority == 1 %}低
+                                        {% elif task.priority == 3 %}高
+                                        {% else %}中
+                                        {% endif %}
+                                    </span>
+                                {% endif %}
+                            </div>
                         </div>
-                        <div class="flex items-center gap-4">
-                            <span class="text-xs text-slate-400">ID: {{ task.id }}</span>
+                        <div class="flex items-center gap-3">
+                            <span class="text-xs text-slate-400 hidden sm:inline">ID: {{ task.id }}</span>
                             <div class="flex items-center gap-2">
                                 <a href="{{ url_for('edit_task', task_id=task.id) }}" class="text-slate-400 hover:text-blue-500 transition">
                                     <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="w-6 h-6">
@@ -88,7 +124,7 @@
                                         <path d="M5.25 5.25a3 3 0 0 0-3 3v10.5a3 3 0 0 0 3 3h10.5a3 3 0 0 0 3-3V13.5a.75.75 0 0 0-1.5 0v5.25a1.5 1.5 0 0 1-1.5 1.5H5.25a1.5 1.5 0 0 1-1.5-1.5V8.25a1.5 1.5 0 0 1 1.5-1.5h5.25a.75.75 0 0 0 0-1.5H5.25Z" />
                                     </svg>
                                 </a>
-                                <a href="{{ url_for('delete_task', task_id=task.id) }}" class="text-slate-400 hover:text-red-500 transition">
+                                <a href="{{ url_for('delete_task', task_id=task.id) }}" class="text-slate-400 hover:text-red-500 transition delete-task-btn"> {# クラス追加 #}
                                     <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="w-6 h-6">
                                         <path fill-rule="evenodd" d="M16.5 4.478v.227a48.816 48.816 0 0 1 3.878.512.75.75 0 1 1-.256 1.478l-.209-.035-1.005 13.006a.75.75 0 0 1-.749.684H7.08a.75.75 0 0 1-.749-.684L5.33 6.63a.75.75 0 0 1-.256-1.478A48.567 48.567 0 0 1 9 4.705v-.227c0-1.564 1.213-2.9 2.816-2.9h.368c1.603 0 2.816 1.336 2.816 2.9ZM12 6.25a.75.75 0 0 1 .75.75v8.5a.75.75 0 0 1-1.5 0v-8.5a.75.75 0 0 1 .75-.75Z" clip-rule="evenodd" />
                                     </svg>
@@ -106,5 +142,173 @@
             <p>Powered by Flask, Docker & Tailwind CSS</p>
         </footer>
     </div>
+
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    const addTaskForm = document.getElementById('addTaskForm');
+    const taskList = document.getElementById('taskList');
+    const flashMessagesContainer = document.getElementById('flashMessages');
+
+    if (addTaskForm) {
+        addTaskForm.addEventListener('submit', function(event) {
+            event.preventDefault();
+            const formData = new FormData(addTaskForm);
+            const data = {
+                title: formData.get('title'),
+                due_date: formData.get('due_date') || null,
+                priority: parseInt(formData.get('priority'), 10)
+            };
+
+            fetch("{{ url_for('add_task') }}", {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify(data)
+            })
+            .then(response => response.json())
+            .then(result => {
+                displayFlashMessage(result.message, result.status === 'success' ? 'success' : (result.status === 'error' ? 'danger' : 'info'));
+                if (result.status === 'success' && result.task) {
+                    addTaskToDOM(result.task);
+                    addTaskForm.reset();
+                }
+            })
+            .catch(error => {
+                console.error('Error:', error);
+                displayFlashMessage('リクエスト処理中にエラーが発生しました。', 'danger');
+            });
+        });
+    }
+
+    function addTaskToDOM(task) {
+        const listItem = document.createElement('li');
+        listItem.className = 'p-4 flex items-center justify-between';
+        listItem.setAttribute('data-task-id', task.id);
+
+        let dueDateHTML = task.due_date ? `<span>期限: ${task.due_date}</span>` : '';
+        let priorityHTML = task.priority_display ? `<span class="ml-2">優先度: ${task.priority_display}</span>` : '';
+        
+        const completeTaskUrl = `{{ url_for("complete_task", task_id=0) }}`.replace('0', task.id);
+        const editTaskUrl = `{{ url_for("edit_task", task_id=0) }}`.replace('0', task.id);
+        const deleteTaskUrl = `{{ url_for("delete_task", task_id=0) }}`.replace('0', task.id);
+
+        listItem.innerHTML = `
+            <div class="flex-grow">
+                <div class="flex items-center">
+                    <a href="${completeTaskUrl}" class="mr-3 text-2xl complete-task-btn">
+                        <div class="w-6 h-6 border-2 border-slate-300 rounded-md hover:bg-green-100 transition"></div>
+                    </a>
+                    <span class="text-lg">${task.title}</span>
+                </div>
+                <div class="text-xs text-slate-500 mt-1 ml-9">
+                    ${dueDateHTML} ${priorityHTML}
+                </div>
+            </div>
+            <div class="flex items-center gap-3">
+                <span class="text-xs text-slate-400 hidden sm:inline">ID: ${task.id}</span>
+                <div class="flex items-center gap-2">
+                    <a href="${editTaskUrl}" class="text-slate-400 hover:text-blue-500 transition">
+                        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="w-6 h-6"><path d="M21.731 2.269a2.625 2.625 0 0 0-3.712 0l-1.157 1.157 3.712 3.712 1.157-1.157a2.625 2.625 0 0 0 0-3.712ZM19.513 8.199l-3.712-3.712-8.4 8.4a5.25 5.25 0 0 0-1.32 2.214l-.8 2.685a.75.75 0 0 0 .933.933l2.685-.8a5.25 5.25 0 0 0 2.214-1.32l8.4-8.4Z" /><path d="M5.25 5.25a3 3 0 0 0-3 3v10.5a3 3 0 0 0 3 3h10.5a3 3 0 0 0 3-3V13.5a.75.75 0 0 0-1.5 0v5.25a1.5 1.5 0 0 1-1.5 1.5H5.25a1.5 1.5 0 0 1-1.5-1.5V8.25a1.5 1.5 0 0 1 1.5-1.5h5.25a.75.75 0 0 0 0-1.5H5.25Z" /></svg>
+                    </a>
+                    <a href="${deleteTaskUrl}" class="text-slate-400 hover:text-red-500 transition delete-task-btn">
+                        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="w-6 h-6"><path fill-rule="evenodd" d="M16.5 4.478v.227a48.816 48.816 0 0 1 3.878.512.75.75 0 1 1-.256 1.478l-.209-.035-1.005 13.006a.75.75 0 0 1-.749.684H7.08a.75.75 0 0 1-.749-.684L5.33 6.63a.75.75 0 0 1-.256-1.478A48.567 48.567 0 0 1 9 4.705v-.227c0-1.564 1.213-2.9 2.816-2.9h.368c1.603 0 2.816 1.336 2.816 2.9ZM12 6.25a.75.75 0 0 1 .75.75v8.5a.75.75 0 0 1-1.5 0v-8.5a.75.75 0 0 1 .75-.75Z" clip-rule="evenodd" /></svg>
+                    </a>
+                </div>
+            </div>`;
+        const noTasksMessage = taskList.querySelector('li.text-center');
+        if (noTasksMessage) noTasksMessage.remove();
+        taskList.appendChild(listItem);
+    }
+
+    function displayFlashMessage(message, category) {
+        const existingMessagesContainer = flashMessagesContainer.querySelector('.mb-4'); // 既存のコンテナを取得
+        if (existingMessagesContainer) existingMessagesContainer.innerHTML = ''; // 中身をクリア
+        else flashMessagesContainer.innerHTML = '<div class="mb-4"></div>'; // なければ作成
+
+        const messageDiv = document.createElement('div');
+        let cClass = 'bg-blue-100 text-blue-800';
+        if (category === 'success') cClass = 'bg-green-100 text-green-800';
+        else if (category === 'danger') cClass = 'bg-red-100 text-red-800';
+        else if (category === 'warning') cClass = 'bg-yellow-100 text-yellow-700';
+        messageDiv.className = `p-4 rounded-lg ${cClass}`;
+        messageDiv.setAttribute('role', 'alert');
+        messageDiv.textContent = message;
+        flashMessagesContainer.querySelector('.mb-4').appendChild(messageDiv);
+        setTimeout(() => { messageDiv.remove(); }, 5000);
+    }
+
+    taskList.addEventListener('click', function(event) {
+        const target = event.target.closest('a');
+        if (!target) return;
+        const url = target.getAttribute('href');
+        const listItemElement = target.closest('li');
+
+        if (target.classList.contains('complete-task-btn') || target.classList.contains('reactivate-task-btn')) {
+            event.preventDefault();
+            fetch(url, { method: 'GET', headers: {'X-Requested-With': 'XMLHttpRequest'} })
+            .then(response => response.json())
+            .then(result => {
+                displayFlashMessage(result.message, result.status === 'success' ? 'success' : 'danger');
+                if (result.status === 'success' && result.task) updateTaskInDOM(listItemElement, result.task);
+            }).catch(error => displayFlashMessage('タスク状態の変更中にエラー。', 'danger'));
+        } else if (target.classList.contains('delete-task-btn')) {
+            event.preventDefault();
+            if (confirm('本当にこのタスクを削除しますか？')) {
+                fetch(url, { method: 'GET', headers: {'X-Requested-With': 'XMLHttpRequest'} })
+                .then(response => response.json())
+                .then(result => {
+                    displayFlashMessage(result.message, result.status === 'success' ? 'success' : 'danger');
+                    if (result.status === 'success') {
+                        listItemElement.remove();
+                        if (taskList.children.length === 0) {
+                            const noMsg = document.createElement('li');
+                            noMsg.className = 'p-4 text-center text-slate-500';
+                            noMsg.textContent = 'タスクはありません。';
+                            taskList.appendChild(noMsg);
+                        }
+                    }
+                }).catch(error => displayFlashMessage('タスクの削除中にエラー。', 'danger'));
+            }
+        }
+    });
+
+    function updateTaskInDOM(listItem, task) {
+        const titleEl = listItem.querySelector('span.text-lg, span.line-through');
+        const actionLink = listItem.querySelector('a.complete-task-btn, a.reactivate-task-btn');
+        const checkDiv = actionLink.querySelector('div');
+        let reactivateSvg = actionLink.querySelector('svg');
+
+        titleEl.textContent = task.title; // タイトル更新
+        if (task.completed) {
+            titleEl.className = 'text-lg text-slate-400 line-through';
+            actionLink.href = `{{ url_for("reactivate_task", task_id=0) }}`.replace('0', task.id);
+            actionLink.className = 'mr-3 text-2xl text-slate-400 hover:text-sky-500 transition reactivate-task-btn';
+            if (checkDiv) checkDiv.classList.add('hidden');
+            if (!reactivateSvg) { // SVGがなければ作成
+                reactivateSvg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+                reactivateSvg.setAttribute("viewBox", "0 0 24 24");
+                reactivateSvg.setAttribute("fill", "currentColor");
+                reactivateSvg.classList.add("w-6", "h-6");
+                const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+                path.setAttribute("fill-rule", "evenodd");
+                path.setAttribute("d", "M9.53 2.47a.75.75 0 0 1 0 1.06L4.81 8.25H15a6.75 6.75 0 0 1 0 13.5h-3a.75.75 0 0 1 0-1.5h3a5.25 5.25 0 1 0 0-10.5H4.81l4.72 4.72a.75.75 0 1 1-1.06 1.06l-6-6a.75.75 0 0 1 0-1.06l6-6a.75.75 0 0 1 1.06 0Z");
+                path.setAttribute("clip-rule", "evenodd");
+                reactivateSvg.appendChild(path);
+                actionLink.appendChild(reactivateSvg);
+            }
+            reactivateSvg.classList.remove('hidden');
+        } else {
+            titleEl.className = 'text-lg';
+            actionLink.href = `{{ url_for("complete_task", task_id=0) }}`.replace('0', task.id);
+            actionLink.className = 'mr-3 text-2xl complete-task-btn';
+            if (reactivateSvg) reactivateSvg.classList.add('hidden');
+            if (checkDiv) checkDiv.classList.remove('hidden');
+        }
+        const detailsDiv = listItem.querySelector('.text-xs.text-slate-500');
+        let dueDateHTML = task.due_date ? `<span>期限: ${task.due_date}</span>` : '';
+        let priorityHTML = task.priority_display ? `<span class="ml-2">優先度: ${task.priority_display}</span>` : '';
+        detailsDiv.innerHTML = `${dueDateHTML} ${priorityHTML}`.trim();
+    }
+});
+</script>
 </body>
 </html>

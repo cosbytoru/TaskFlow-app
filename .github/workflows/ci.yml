@@ -35,3 +35,8 @@ jobs:
     - name: Lint with flake8
       run: |
         docker compose run --rm web flake8 .
+
+    # 4. pytestでテストを実行する
+    - name: Run tests with pytest
+      run: |
+        docker compose run --rm web pytest

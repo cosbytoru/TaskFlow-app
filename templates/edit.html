@@ -14,17 +14,36 @@
         <div class="bg-white p-6 rounded-lg shadow-md">
             <!-- taskオブジェクトが存在する場合のみフォームを表示 -->
             {% if task %}
-            <form action="{{ url_for('edit_task', task_id=task[0]) }}" method="post" class="flex flex-col gap-4">
+            <form action="{{ url_for('edit_task', task_id=task.id) }}" method="post" class="flex flex-col gap-4">
                 <div>
-                    <label for="title" class="block text-sm font-medium text-slate-700 mb-2">タスクのタイトル (ID: {{ task[0] }})</label>
+                    <label for="title" class="block text-sm font-medium text-slate-700 mb-2">タスクのタイトル (ID: {{ task.id }})</label>
                     <input 
                         type="text" 
                         name="title" 
                         id="title"
-                        value="{{ task[1] }}" 
+                        value="{{ task.title }}" 
                         required
                         class="w-full p-3 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-sky-500 transition"
                     >
+                    </div>
+                    <div>
+                        <label for="due_date" class="block text-sm font-medium text-slate-700 mb-2">期限日</label>
+                        <input 
+                            type="date" 
+                            name="due_date" 
+                            id="due_date"
+                            value="{{ task.due_date.strftime('%Y-%m-%d') if task.due_date else '' }}"
+                            class="w-full p-3 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-sky-500 transition"
+                        >
+                    </div>
+                    <div>
+                        <label for="priority" class="block text-sm font-medium text-slate-700 mb-2">優先度</label>
+                        <select name="priority" id="priority" class="w-full p-3 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-sky-500 transition">
+                            <option value="1" {% if task.priority == 1 %}selected{% endif %}>低</option>
+                            <option value="2" {% if task.priority == 2 %}selected{% endif %}>中</option>
+                            <option value="3" {% if task.priority == 3 %}selected{% endif %}>高</option>
+                        </select>
+                </div>
                 </div>
                 <div class="flex justify-end gap-4">
                     <a href="{{ url_for('index') }}" class="bg-slate-200 hover:bg-slate-300 text-slate-800 font-bold py-3 px-6 rounded-lg transition">

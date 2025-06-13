@@ -1,4 +1,9 @@
-✨ 主な機能
+# TaskFlow-app
+
+TaskFlow-app は、Flask と Docker で構築されたシンプルなToDoアプリケーションです。ユーザー認証、タスクのCRUD操作、データベースマイグレーションなどの基本的な機能を備えています。
+
+## ✨ 主な機能
+
 ユーザー認証: 安全なサインアップ、ログイン、ログアウト機能
 
 タスク管理 (CRUD): タスクの追加、一覧表示、編集、削除
@@ -6,8 +11,7 @@
 タスク状態管理: タスクの完了・未完了の切り替え
 
 データベースマイグレーション: Flask-Migrateによるスキーマ変更管理
-
-🛠️ 技術スタック
+## 🛠️ 技術スタック
 バックエンド: Flask
 
 フロントエンド: HTML, Tailwind CSS
@@ -20,40 +24,49 @@ CI: GitHub Actions
 
 Pythonライブラリ: Flask-SQLAlchemy, Flask-Login, Flask-Migrateなど（詳細はrequirements.txtを参照）
 
-🚀 セットアップ & 実行手順
-前提条件
-Docker
+## 🚀 はじめに (Getting Started)
 
-Docker Compose (Docker Desktopに含まれています)
+### 前提条件
+
+- Docker Engine
+- Docker Compose (Docker Desktop for Mac/Windows には含まれています)
 
 1. リポジトリをクローン
-git clone https://github.com/cosbytoru/taskflow-app.git
+```bash
+git clone https://github.com/cosbytoru/TaskFlow-app.git
 cd taskflow-app
+```
 
 2. コンテナのビルドと起動
+
 以下のコマンドで、Dockerコンテナをビルドし、バックグラウンドで起動します。
-
+```bash
 docker compose up --build -d
-
+```
 初回起動時にはイメージのビルドに数分かかることがあります。
 
-3. データベースの初期化
-初回起動時のみ、以下のコマンドを実行してデータベース内にテーブルを作成します。
+3. データベースのマイグレーション
 
+以下のコマンドを実行してデータベースのマイグレーション（テーブル作成や更新）を行います。初回起動時やモデル変更後に実行してください。
+```bash
 docker compose exec web flask db upgrade
+```
 
-セットアップは以上です！
-ブラウザで http://localhost:5001 にアクセスしてください。
+4. アプリケーションへのアクセス
 
-🔧 データベースの更新方法（開発者向け）
-app.py内のモデル（UserクラスやTaskクラス）に変更を加えた場合は、以下のコマンドでデータベースのスキーマを更新します。
+ブラウザで `http://localhost:5001` にアクセスしてください。
 
-マイグレーションファイルの自動生成
-モデルの変更点を検出し、更新用のマイグレーションファイルを生成します。
+## 🔧 開発者向け情報 (For Developers)
 
-docker compose exec web flask db migrate -m "変更内容の要約（例: Add due_date to Task）"
+### データベースのスキーマ更新
 
-データベースへの適用
-生成されたファイルを元に、データベースのテーブル構造を更新します。
+`app.py` 内のモデル（`User`クラスや`Task`クラス）に変更を加えた場合は、以下の手順でデータベースのスキーマを更新します。
 
-docker compose exec web flask db upgrade
+1. **マイグレーションファイルの自動生成:** モデルの変更点を検出し、更新用のマイグレーションファイルを生成します。
+   ```bash
+   docker compose exec web flask db migrate -m "変更内容の要約（例: Add due_date to Task）"
+   ```
+2. **データベースへの適用:** 生成されたファイルを元に、データベースのテーブル構造を更新します。
+   ```bash
+   docker compose exec web flask db upgrade
+   ```
