@@ -59,7 +59,7 @@ def logged_in_user(client, db):
     """
     username = "testuser"
     password = "password123"
-    
+
     user = User(username=username, password_hash=generate_password_hash(password))
     db.session.add(user)
     db.session.commit()

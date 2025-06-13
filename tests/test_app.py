@@ -1,9 +1,7 @@
 # tests/test_app.py
-import json
 from datetime import date
-from flask import session as flask_session, get_flashed_messages
+from flask import session as flask_session
 from app import User, Task, db as app_db # conftest.pyでappとdbは設定される
-from werkzeug.security import check_password_hash
 
 def test_index_page_unauthenticated(client):
     """未認証状態でトップページにアクセスするとログインページにリダイレクトされるか"""
@@ -134,7 +132,7 @@ def test_delete_task_form(logged_in_user, db):
 def test_edit_task_form(logged_in_user, db):
     """タスクの編集がフォーム経由で機能するか"""
     user, client = logged_in_user
-    task = Task(title="Editable Task", owner=user, priority=1, due_date=date(2025,1,1))
+    task = Task(title="Editable Task", owner=user, priority=1, due_date=date(2025, 1, 1))
     db.session.add(task)
     db.session.commit()
 
@@ -149,19 +147,17 @@ def test_edit_task_form(logged_in_user, db):
 
     assert response.status_code == 200
     assert f"タスクID {task.id} のタイトルを「{new_title}」に更新しました。".encode('utf-8') in response.data
-    
+
     edited_task = app_db.session.get(Task, task.id)
     assert edited_task.title == new_title
     assert edited_task.due_date == date(2026, 1, 1)
     assert edited_task.priority == 2
-
 # --- APIテスト (JSONベース) ---
 def test_add_task_api(logged_in_user, db):
     """API経由でタスクを正常に追加できるか"""
     user, client = logged_in_user
     task_data = {'title': 'API Task', 'due_date': '2025-10-10', 'priority': 1}
     response = client.post('/add', json=task_data)
-    
     assert response.status_code == 200
     json_response = response.get_json()
     assert json_response['status'] == 'success'
@@ -169,10 +165,8 @@ def test_add_task_api(logged_in_user, db):
     assert json_response['task']['title'] == task_data['title']
     assert json_response['task']['due_date'] == task_data['due_date']
     assert json_response['task']['priority'] == task_data['priority']
-    
     task_in_db = Task.query.filter_by(title=task_data['title'], user_id=user.id).first()
     assert task_in_db is not None
-
 def test_add_task_api_empty_title(logged_in_user):
     """API経由で空のタイトルでタスクを追加しようとした場合"""
     user, client = logged_in_user
@@ -181,7 +175,6 @@ def test_add_task_api_empty_title(logged_in_user):
     json_response = response.get_json()
     assert json_response['status'] == 'error'
     assert json_response['message'] == "タスクのタイトルを入力してください。"
-
 def test_complete_task_api(logged_in_user, db):
     """API経由でタスクを完了できるか"""
     user, client = logged_in_user
@@ -228,7 +221,7 @@ def test_cannot_operate_other_user_task(client, db):
     user2_name, user2_pass = "user2", "pass2"
     db.session.add(User(username=user2_name, password_hash=generate_password_hash(user2_pass)))
     db.session.commit()
-    
+
     client.post('/login', data={'username': user2_name, 'password': user2_pass}, follow_redirects=True)
 
     # ユーザー2がユーザー1のタスクを操作しようとする
