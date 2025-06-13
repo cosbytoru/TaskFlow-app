@@ -70,3 +70,17 @@ docker compose exec web flask db upgrade
    ```bash
    docker compose exec web flask db upgrade
    ```
+
+   
+### 静的解析 (Linting)
+
+`flake8` を使用してコードの静的解析を実行できます。
+```bash
+docker compose run --rm web flake8 .
+```
+
+### テスト実行 (Testing)
+`pytest` を使用してテストを実行できます。
+```bash
+docker compose run --rm web pytest
+```
