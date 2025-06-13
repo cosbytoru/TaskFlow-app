@@ -60,8 +60,10 @@ def load_user(user_id):
 
 # 優先度表示用のヘルパー関数
 def get_priority_display(priority_val):
-    if priority_val == 1: return "低"
-    if priority_val == 3: return "高"
+    if priority_val == 1:
+        return "低"
+    if priority_val == 3:
+        return "高"
     return "中"
 
 
