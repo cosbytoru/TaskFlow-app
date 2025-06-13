@@ -9,6 +9,7 @@ services:
     environment:
       - FLASK_APP=app.py
       - FLASK_DEBUG=1
+      - PYTHONPATH=/app # Pythonがモジュールを検索するパスに/appを追加
     depends_on:
       - db # dbサービスが起動してから、webサービスを起動する
 
