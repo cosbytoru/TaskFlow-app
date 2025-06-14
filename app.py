@@ -72,12 +72,54 @@ def get_priority_display(priority_val):
 @login_required
 def index():
     try:
-        # SQLAlchemyを使って現在のユーザーのタスクを取得
-        tasks = Task.query.filter_by(owner=current_user).order_by(Task.id).all()
+        # ベースとなるクエリ
+        query = Task.query.filter_by(owner=current_user)
+
+        # 絞り込み (フィルタリング)
+        filter_status = request.args.get('filter_status')
+        if filter_status == 'completed':
+            query = query.filter_by(completed=True)
+        elif filter_status == 'incomplete':
+            query = query.filter_by(completed=False)
+        # 'all' または指定なしの場合は、全てのタスクを表示
+
+        # 検索機能
+        search_term = request.args.get('search_term')
+        if search_term:
+            query = query.filter(Task.title.ilike(f'%{search_term}%')) # 大文字・小文字を区別しない検索
+
+        # 並び替え機能
+        sort_by = request.args.get('sort_by', 'id') # デフォルトはID順
+        sort_order = request.args.get('sort_order', 'asc') # デフォルトは昇順
+
+        if sort_by == 'priority':
+            # 優先度 (1:低, 2:中, 3:高)。昇順なら低→高、降順なら高→低。
+            # 優先度が同じ場合はID順で安定ソート
+            if sort_order == 'desc':
+                query = query.order_by(Task.priority.desc(), Task.id.asc())
+            else:
+                query = query.order_by(Task.priority.asc(), Task.id.asc())
+        elif sort_by == 'due_date':
+            # 期限日。期限日がないタスク (NULL) の扱いを考慮
+            # 期限日が同じ場合はID順で安定ソート
+            if sort_order == 'desc':
+                # 降順の場合、NULLを先頭 (nullsfirst) または末尾 (nullslast) に表示
+                query = query.order_by(Task.due_date.desc().nullsfirst(), Task.id.asc())
+            else:
+                # 昇順の場合、NULLを末尾に表示
+                query = query.order_by(Task.due_date.asc().nullslast(), Task.id.asc())
+        else: # 'id' または未定義のキー
+            sort_by = 'id' # 正規化
+            if sort_order == 'desc':
+                query = query.order_by(Task.id.desc())
+            else:
+                query = query.order_by(Task.id.asc())
+
+        tasks = query.all()
     except Exception as error:
         flash(f"タスクの読み込み中にエラー: {error}", "danger")
         tasks = [] # エラー時は空のリスト
-    return render_template('index.html', tasks=tasks)
+    return render_template('index.html', tasks=tasks, current_sort_by=sort_by, current_sort_order=sort_order, current_filter_status=filter_status, current_search_term=search_term)
 
 
 @app.route('/add', methods=['POST'])
@@ -126,7 +168,17 @@ def add_task():
             return jsonify({'status': 'error', 'message': message}), 500
         else:
             flash(message, "danger")
-    return redirect(url_for('index'))
+    # HTMLフォームからのリクエストの場合、ソート等のパラメータを引き継ぐ
+    # フォームから送信されたソート情報を取得 (デフォルト値を設定)
+    redirect_sort_by = request.form.get('current_sort_by', 'id')
+    redirect_sort_order = request.form.get('current_sort_order', 'asc')
+    redirect_filter_status = request.form.get('current_filter_status')
+    redirect_search_term = request.form.get('current_search_term')
+    return redirect(url_for('index',
+                            sort_by=redirect_sort_by,
+                            sort_order=redirect_sort_order,
+                            filter_status=redirect_filter_status,
+                            search_term=redirect_search_term))
 
 
 @app.route('/complete/<int:task_id>')
@@ -240,7 +292,7 @@ def edit_task(task_id):
     if request.method == 'POST':
         new_title = request.form.get('title')
         new_due_date_str = request.form.get('due_date')
-        new_priority = request.form.get('priority', type=int)
+        new_priority = request.form.get('priority', type=int, default=task_to_edit.priority) # 編集時に指定がなければ既存の値
 
         if new_title:
             try:

@@ -77,12 +77,57 @@
                         class="w-full bg-sky-500 hover:bg-sky-600 text-white font-bold py-3 px-6 rounded-lg transition"
                     >追加</button>
                 </div>
+                {# --- ↓↓↓ ここから追加 --- #}
+                {# 現在のソート順、フィルタリング状態、検索語を保持する隠しフィールド #}
+                <input type="hidden" name="current_sort_by" value="{{ current_sort_by if current_sort_by else 'id' }}">
+                <input type="hidden" name="current_sort_order" value="{{ current_sort_order if current_sort_order else 'asc' }}">
+                {% if current_filter_status %}
+                <input type="hidden" name="current_filter_status" value="{{ current_filter_status }}">
+                {% endif %}
+                {% if current_search_term %}
+                <input type="hidden" name="current_search_term" value="{{ current_search_term }}">
+                {% endif %}
+                {# --- ↑↑↑ ここまで追加 --- #}
             </form>
+        </div>
+
+
+{# <!-- タスク一覧の上など、適切な位置に挿入 --> #}
+        <div class="mb-4 flex flex-wrap justify-center sm:justify-end items-center gap-x-4 gap-y-2">
+            <span class="text-sm font-medium text-slate-700">並び替え:</span>
+            <div class="flex flex-wrap justify-center sm:justify-start gap-x-3 gap-y-2">
+                <a href="{{ url_for('index', sort_by='priority', sort_order='desc', filter_status=current_filter_status, search_term=current_search_term) }}" 
+                   class="px-3 py-1 text-xs font-medium rounded-md transition 
+                          {% if current_sort_by == 'priority' and current_sort_order == 'desc' %} bg-sky-500 text-white {% else %} bg-slate-200 text-slate-700 hover:bg-slate-300 {% endif %}">
+                   優先度(高順)
+                </a>
+                <a href="{{ url_for('index', sort_by='priority', sort_order='asc', filter_status=current_filter_status, search_term=current_search_term) }}" 
+                   class="px-3 py-1 text-xs font-medium rounded-md transition 
+                          {% if current_sort_by == 'priority' and current_sort_order == 'asc' %} bg-sky-500 text-white {% else %} bg-slate-200 text-slate-700 hover:bg-slate-300 {% endif %}">
+                   優先度(低順)
+                </a>
+                <a href="{{ url_for('index', sort_by='due_date', sort_order='asc', filter_status=current_filter_status, search_term=current_search_term) }}" 
+                   class="px-3 py-1 text-xs font-medium rounded-md transition 
+                          {% if current_sort_by == 'due_date' and current_sort_order == 'asc' %} bg-sky-500 text-white {% else %} bg-slate-200 text-slate-700 hover:bg-slate-300 {% endif %}">
+                   期限日(昇順)
+                </a>
+                <a href="{{ url_for('index', sort_by='due_date', sort_order='desc', filter_status=current_filter_status, search_term=current_search_term) }}" 
+                   class="px-3 py-1 text-xs font-medium rounded-md transition 
+                          {% if current_sort_by == 'due_date' and current_sort_order == 'desc' %} bg-sky-500 text-white {% else %} bg-slate-200 text-slate-700 hover:bg-slate-300 {% endif %}">
+                   期限日(降順)
+                </a>
+                <a href="{{ url_for('index', sort_by='id', sort_order='asc', filter_status=current_filter_status, search_term=current_search_term) }}" 
+                   class="px-3 py-1 text-xs font-medium rounded-md transition 
+                          {% if current_sort_by == 'id' %} bg-sky-500 text-white {% else %} bg-slate-200 text-slate-700 hover:bg-slate-300 {% endif %}">
+                   ID(昇順)
+                </a>
+            </div>
         </div>
 
         <!-- タスク一覧 -->
         <div class="bg-white rounded-lg shadow-md">
             <ul id="taskList" class="divide-y divide-slate-200"> {# IDを追加 #}
+
                 {% for task in tasks %}
                     <li class="p-4 flex items-center justify-between" data-task-id="{{ task.id }}">
                         <div class="flex-grow">
@@ -168,8 +213,27 @@ document.addEventListener('DOMContentLoaded', function() {
             .then(result => {
                 displayFlashMessage(result.message, result.status === 'success' ? 'success' : (result.status === 'error' ? 'danger' : 'info'));
                 if (result.status === 'success' && result.task) {
-                    addTaskToDOM(result.task);
+                    // addTaskToDOM(result.task); // DOMの部分更新をコメントアウトまたは削除
                     addTaskForm.reset();
+
+                    // 現在のソート・フィルタリング情報をフォームの隠しフィールドから取得してリロード
+                    const currentSortBy = addTaskForm.querySelector('input[name="current_sort_by"]').value;
+                    const currentSortOrder = addTaskForm.querySelector('input[name="current_sort_order"]').value;
+                    const currentFilterStatusInput = addTaskForm.querySelector('input[name="current_filter_status"]');
+                    const currentFilterStatus = currentFilterStatusInput ? currentFilterStatusInput.value : '';
+                    const currentSearchTermInput = addTaskForm.querySelector('input[name="current_search_term"]');
+                    const currentSearchTerm = currentSearchTermInput ? currentSearchTermInput.value : '';
+
+                    let redirectUrl = new URL("{{ url_for('index') }}", window.location.origin);
+                    redirectUrl.searchParams.set('sort_by', currentSortBy);
+                    redirectUrl.searchParams.set('sort_order', currentSortOrder);
+                    if (currentFilterStatus) {
+                        redirectUrl.searchParams.set('filter_status', currentFilterStatus);
+                    }
+                    if (currentSearchTerm) {
+                        redirectUrl.searchParams.set('search_term', currentSearchTerm);
+                    }
+                    window.location.href = redirectUrl.toString();
                 }
             })
             .catch(error => {
