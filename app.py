@@ -40,7 +40,7 @@ class User(UserMixin, db.Model):
     username = db.Column(db.String(80), unique=True, nullable=False)
     password_hash = db.Column(db.String(255), nullable=False)
     # Taskモデルとのリレーションシップを定義
-    tasks = db.relationship('Task', backref='owner', lazy=True)
+    tasks = db.relationship('Task', backref='owner', lazy=True, cascade="all, delete-orphan")
 
 # tasksテーブルに対応するモデル
 class Task(db.Model):
@@ -51,6 +51,15 @@ class Task(db.Model):
     due_date = db.Column(db.Date, nullable=True) # <-- 追加
     priority = db.Column(db.Integer, nullable=True, default=2) # <-- 追加 (1:低, 2:中, 3:高)
     user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
+    # SubTaskモデルとのリレーションシップを定義 (一対多)
+    subtasks = db.relationship('SubTask', backref='task', lazy=True, cascade="all, delete-orphan")
+
+class SubTask(db.Model):
+    __tablename__ = 'subtasks'
+    id = db.Column(db.Integer, primary_key=True)
+    title = db.Column(db.String(255), nullable=False)
+    completed = db.Column(db.Boolean, nullable=False, default=False)
+    task_id = db.Column(db.Integer, db.ForeignKey('tasks.id'), nullable=False)
 
 
 @login_manager.user_loader
@@ -119,7 +128,9 @@ def index():
     except Exception as error:
         flash(f"タスクの読み込み中にエラー: {error}", "danger")
         tasks = [] # エラー時は空のリスト
-    return render_template('index.html', tasks=tasks, current_sort_by=sort_by, current_sort_order=sort_order, current_filter_status=filter_status, current_search_term=search_term)
+    return render_template('index.html', tasks=tasks, current_sort_by=sort_by, 
+                           current_sort_order=sort_order, current_filter_status=filter_status, 
+                           current_search_term=search_term)
 
 
 @app.route('/add', methods=['POST'])
@@ -174,11 +185,13 @@ def add_task():
     redirect_sort_order = request.form.get('current_sort_order', 'asc')
     redirect_filter_status = request.form.get('current_filter_status')
     redirect_search_term = request.form.get('current_search_term')
-    return redirect(url_for('index',
-                            sort_by=redirect_sort_by,
-                            sort_order=redirect_sort_order,
-                            filter_status=redirect_filter_status,
-                            search_term=redirect_search_term))
+    return redirect(url_for(
+        'index',
+        sort_by=redirect_sort_by,
+        sort_order=redirect_sort_order,
+        filter_status=redirect_filter_status,
+        search_term=redirect_search_term
+    ))
 
 
 @app.route('/complete/<int:task_id>')
@@ -315,6 +328,55 @@ def edit_task(task_id):
     # GETリクエストでは、取得したtask_to_editオブジェクトをテンプレートに渡す
     return render_template('edit.html', task=task_to_edit)
 
+# --- サブタスク関連のルート ---
+@app.route('/subtask/add/<int:task_id>', methods=['POST'])
+@login_required
+def add_subtask(task_id):
+    task = Task.query.filter_by(id=task_id, owner=current_user).first_or_404()
+    title = request.form.get('subtask_title')
+
+    if not title:
+        flash("サブタスクのタイトルを入力してください。", "warning")
+        return redirect(url_for('index', _anchor=f'task-{task.id}'))
+
+    try:
+        new_subtask = SubTask(title=title, task_id=task.id)
+        db.session.add(new_subtask)
+        db.session.commit()
+        flash(f"サブタスク「{title}」をタスク「{task.title}」に追加しました。", "success")
+    except Exception as e:
+        db.session.rollback()
+        flash(f"サブタスクの追加中にエラーが発生しました: {e}", "danger")
+    return redirect(url_for('index', _anchor=f'task-{task.id}'))
+
+
+@app.route('/subtask/toggle/<int:subtask_id>', methods=['POST'])
+@login_required
+def toggle_subtask(subtask_id):
+    subtask = SubTask.query.get_or_404(subtask_id)
+    if subtask.task.owner != current_user:
+        flash("権限がありません。", "danger")
+        # AJAXリクエストの場合、適切なエラーコードを返す
+        if request.headers.get('X-Requested-With') == 'XMLHttpRequest':
+            return jsonify({'status': 'error', 'message': '権限がありません。'}), 403
+        return redirect(url_for('index'))
+
+    try:
+        subtask.completed = not subtask.completed
+        db.session.commit()
+        if request.headers.get('X-Requested-With') == 'XMLHttpRequest':
+            return jsonify({
+                'status': 'success',
+                'message': f"サブタスク「{subtask.title}」の状態を更新しました。",
+                'subtask': {'id': subtask.id, 'title': subtask.title, 'completed': subtask.completed}
+            })
+        flash(f"サブタスク「{subtask.title}」の状態を更新しました。", "success")
+    except Exception as e:
+        db.session.rollback()
+        flash(f"サブタスクの状態更新中にエラーが発生しました: {e}", "danger")
+        if request.headers.get('X-Requested-With') == 'XMLHttpRequest':
+            return jsonify({'status': 'error', 'message': f"サブタスクの状態更新中にエラー: {e}"}), 500
+    return redirect(url_for('index', _anchor=f'task-{subtask.task_id}'))
 
 # --- 認証ルート ---
 @app.route('/signup', methods=['GET', 'POST'])
@@ -374,6 +436,40 @@ def logout():
     logout_user()
     flash("ログアウトしました。", "info")
     return redirect(url_for('login'))
+
+# --- プロファイル編集ルート ---
+@app.route('/profile/edit', methods=['GET', 'POST'])
+@login_required
+def edit_profile():
+    if request.method == 'POST':
+        current_password = request.form.get('current_password')
+        new_password = request.form.get('new_password')
+        confirm_new_password = request.form.get('confirm_new_password')
+
+        # 現在のパスワードを確認
+        if not check_password_hash(current_user.password_hash, current_password):
+            flash('現在のパスワードが正しくありません。', 'danger')
+            return redirect(url_for('edit_profile'))
+
+        # 新しいパスワードが入力されているか確認
+        if not new_password:
+            flash('新しいパスワードを入力してください。', 'warning')
+            return redirect(url_for('edit_profile'))
+
+        # 新しいパスワードと確認用パスワードが一致するか確認
+        if new_password != confirm_new_password:
+            flash('新しいパスワードと確認用パスワードが一致しません。', 'danger')
+            return redirect(url_for('edit_profile'))
+
+        try:
+            current_user.password_hash = generate_password_hash(new_password)
+            db.session.commit()
+            flash('パスワードが正常に更新されました。', 'success')
+            return redirect(url_for('index'))
+        except Exception as e:
+            db.session.rollback()
+            flash(f'パスワード更新中にエラーが発生しました: {e}', 'danger')
+    return render_template('edit_profile.html')
 
 
 if __name__ == '__main__':

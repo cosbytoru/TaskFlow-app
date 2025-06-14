@@ -14,6 +14,7 @@
             <div>
                 {% if current_user.is_authenticated %}
                     <span class="mr-4">ようこそ, {{ current_user.username }} さん</span>
+                    <a href="{{ url_for('edit_profile') }}" class="mr-4 text-sky-500 hover:text-sky-700">プロファイル編集</a>
                     <a href="{{ url_for('logout') }}" class="text-red-500 hover:text-red-700">ログアウト</a>
                 {% endif %}
             </div>
@@ -93,34 +94,70 @@
 
 
 {# <!-- タスク一覧の上など、適切な位置に挿入 --> #}
-        <div class="mb-4 flex flex-wrap justify-center sm:justify-end items-center gap-x-4 gap-y-2">
-            <span class="text-sm font-medium text-slate-700">並び替え:</span>
-            <div class="flex flex-wrap justify-center sm:justify-start gap-x-3 gap-y-2">
-                <a href="{{ url_for('index', sort_by='priority', sort_order='desc', filter_status=current_filter_status, search_term=current_search_term) }}" 
-                   class="px-3 py-1 text-xs font-medium rounded-md transition 
-                          {% if current_sort_by == 'priority' and current_sort_order == 'desc' %} bg-sky-500 text-white {% else %} bg-slate-200 text-slate-700 hover:bg-slate-300 {% endif %}">
-                   優先度(高順)
-                </a>
-                <a href="{{ url_for('index', sort_by='priority', sort_order='asc', filter_status=current_filter_status, search_term=current_search_term) }}" 
-                   class="px-3 py-1 text-xs font-medium rounded-md transition 
-                          {% if current_sort_by == 'priority' and current_sort_order == 'asc' %} bg-sky-500 text-white {% else %} bg-slate-200 text-slate-700 hover:bg-slate-300 {% endif %}">
-                   優先度(低順)
-                </a>
-                <a href="{{ url_for('index', sort_by='due_date', sort_order='asc', filter_status=current_filter_status, search_term=current_search_term) }}" 
-                   class="px-3 py-1 text-xs font-medium rounded-md transition 
-                          {% if current_sort_by == 'due_date' and current_sort_order == 'asc' %} bg-sky-500 text-white {% else %} bg-slate-200 text-slate-700 hover:bg-slate-300 {% endif %}">
-                   期限日(昇順)
-                </a>
-                <a href="{{ url_for('index', sort_by='due_date', sort_order='desc', filter_status=current_filter_status, search_term=current_search_term) }}" 
-                   class="px-3 py-1 text-xs font-medium rounded-md transition 
-                          {% if current_sort_by == 'due_date' and current_sort_order == 'desc' %} bg-sky-500 text-white {% else %} bg-slate-200 text-slate-700 hover:bg-slate-300 {% endif %}">
-                   期限日(降順)
-                </a>
-                <a href="{{ url_for('index', sort_by='id', sort_order='asc', filter_status=current_filter_status, search_term=current_search_term) }}" 
-                   class="px-3 py-1 text-xs font-medium rounded-md transition 
-                          {% if current_sort_by == 'id' %} bg-sky-500 text-white {% else %} bg-slate-200 text-slate-700 hover:bg-slate-300 {% endif %}">
-                   ID(昇順)
-                </a>
+        <div class="mb-4 flex flex-wrap justify-center sm:justify-end items-center gap-x-6 gap-y-4">
+            <!-- 検索フォーム -->
+            <form method="GET" action="{{ url_for('index') }}" class="flex items-center gap-x-2">
+                <label for="search_term_input" class="text-sm font-medium text-slate-700 whitespace-nowrap">検索:</label>
+                <input type="text" name="search_term" id="search_term_input" placeholder="タイトルで検索..."
+                       value="{{ current_search_term if current_search_term else '' }}"
+                       class="px-3 py-1 text-xs font-medium rounded-md border border-slate-300 focus:outline-none focus:ring-1 focus:ring-sky-500 focus:border-sky-500 transition bg-white">
+                <button type="submit"
+                        class="px-3 py-1 text-xs font-medium rounded-md bg-sky-500 text-white hover:bg-sky-600 transition">
+                    検索
+                </button>
+                {# 他のクエリパラメータを引き継ぐための隠しフィールド #}
+                <input type="hidden" name="sort_by" value="{{ current_sort_by if current_sort_by else 'id' }}">
+                <input type="hidden" name="sort_order" value="{{ current_sort_order if current_sort_order else 'asc' }}">
+                <input type="hidden" name="filter_status" value="{{ current_filter_status if current_filter_status else 'all' }}">
+            </form>
+
+            <!-- フィルタリングフォーム -->
+            <form method="GET" action="{{ url_for('index') }}" class="flex items-center gap-x-2">
+                <label for="filter_status_select" class="text-sm font-medium text-slate-700 whitespace-nowrap">フィルター:</label>
+                <select name="filter_status" id="filter_status_select" onchange="this.form.submit()" 
+                        class="px-3 py-1 text-xs font-medium rounded-md border border-slate-300 focus:outline-none focus:ring-1 focus:ring-sky-500 focus:border-sky-500 transition bg-white">
+                    <option value="all" {% if current_filter_status == 'all' or not current_filter_status %}selected{% endif %}>すべて</option>
+                    <option value="completed" {% if current_filter_status == 'completed' %}selected{% endif %}>完了済み</option>
+                    <option value="incomplete" {% if current_filter_status == 'incomplete' %}selected{% endif %}>未完了</option>
+                </select>
+                {# 他のクエリパラメータを引き継ぐための隠しフィールド #}
+                <input type="hidden" name="sort_by" value="{{ current_sort_by if current_sort_by else 'id' }}">
+                <input type="hidden" name="sort_order" value="{{ current_sort_order if current_sort_order else 'asc' }}">
+                {% if current_search_term %}
+                <input type="hidden" name="search_term" value="{{ current_search_term }}">
+                {% endif %}
+            </form>
+
+            <!-- 並び替えコントロール -->
+            <div class="flex items-center gap-x-2">
+                <span class="text-sm font-medium text-slate-700 whitespace-nowrap">並び替え:</span>
+                <div class="flex flex-wrap justify-center sm:justify-start gap-x-3 gap-y-2">
+                    <a href="{{ url_for('index', sort_by='priority', sort_order='desc', filter_status=current_filter_status, search_term=current_search_term) }}"
+                       class="px-3 py-1 text-xs font-medium rounded-md transition
+                              {% if current_sort_by == 'priority' and current_sort_order == 'desc' %} bg-sky-500 text-white {% else %} bg-slate-200 text-slate-700 hover:bg-slate-300 {% endif %}">
+                       優先度(高順)
+                    </a>
+                    <a href="{{ url_for('index', sort_by='priority', sort_order='asc', filter_status=current_filter_status, search_term=current_search_term) }}"
+                       class="px-3 py-1 text-xs font-medium rounded-md transition
+                              {% if current_sort_by == 'priority' and current_sort_order == 'asc' %} bg-sky-500 text-white {% else %} bg-slate-200 text-slate-700 hover:bg-slate-300 {% endif %}">
+                       優先度(低順)
+                    </a>
+                    <a href="{{ url_for('index', sort_by='due_date', sort_order='asc', filter_status=current_filter_status, search_term=current_search_term) }}"
+                       class="px-3 py-1 text-xs font-medium rounded-md transition
+                              {% if current_sort_by == 'due_date' and current_sort_order == 'asc' %} bg-sky-500 text-white {% else %} bg-slate-200 text-slate-700 hover:bg-slate-300 {% endif %}">
+                       期限日(昇順)
+                    </a>
+                    <a href="{{ url_for('index', sort_by='due_date', sort_order='desc', filter_status=current_filter_status, search_term=current_search_term) }}"
+                       class="px-3 py-1 text-xs font-medium rounded-md transition
+                              {% if current_sort_by == 'due_date' and current_sort_order == 'desc' %} bg-sky-500 text-white {% else %} bg-slate-200 text-slate-700 hover:bg-slate-300 {% endif %}">
+                       期限日(降順)
+                    </a>
+                    <a href="{{ url_for('index', sort_by='id', sort_order='asc', filter_status=current_filter_status, search_term=current_search_term) }}"
+                       class="px-3 py-1 text-xs font-medium rounded-md transition
+                              {% if current_sort_by == 'id' %} bg-sky-500 text-white {% else %} bg-slate-200 text-slate-700 hover:bg-slate-300 {% endif %}">
+                       ID(昇順)
+                    </a>
+                </div>
             </div>
         </div>
 
@@ -129,7 +166,7 @@
             <ul id="taskList" class="divide-y divide-slate-200"> {# IDを追加 #}
 
                 {% for task in tasks %}
-                    <li class="p-4 flex items-center justify-between" data-task-id="{{ task.id }}">
+                    <li class="p-4" data-task-id="{{ task.id }}" id="task-{{ task.id }}"> {# id属性追加 #}
                         <div class="flex-grow">
                             <div class="flex items-center">
                                 {% if not task.completed %}
@@ -159,20 +196,40 @@
                                     </span>
                                 {% endif %}
                             </div>
+
+                            <!-- サブタスク表示エリア -->
+                            <div class="ml-9 mt-3 space-y-1">
+                                {% if task.subtasks|length > 0 %}
+                                <h4 class="text-xs font-semibold text-slate-500 mb-1">サブタスク:</h4>
+                                <ul class="space-y-1">
+                                    {% for subtask in task.subtasks %}
+                                    <li class="text-xs flex items-center {{ 'text-slate-400' if subtask.completed else 'text-slate-700' }}" id="subtask-{{ subtask.id }}">
+                                        <form action="{{ url_for('toggle_subtask', subtask_id=subtask.id) }}" method="POST" class="inline-flex items-center subtask-toggle-form"> {# クラス追加 #}
+                                            <input type="checkbox" id="subtask_cb_{{ subtask.id }}" name="subtask_completed"
+                                                   class="subtask-checkbox mr-2 h-3.5 w-3.5 rounded border-slate-400 text-sky-600 focus:ring-sky-500" {% if subtask.completed %}checked{% endif %}> {# onchange削除、クラスは既に提案済み #}
+                                            <label for="subtask_cb_{{ subtask.id }}" class="{{ 'line-through' if subtask.completed else '' }}">{{ subtask.title }}</label>
+                                        </form>
+                                    </li>
+                                    {% endfor %}
+                                </ul>
+                                {% endif %}
+                                <!-- サブタスク追加フォーム -->
+                                <form action="{{ url_for('add_subtask', task_id=task.id) }}" method="post" class="mt-2 flex gap-2 items-center">
+                                    <input type="text" name="subtask_title" placeholder="サブタスクを追加..." required
+                                           class="text-xs p-1.5 border border-slate-300 rounded-md flex-grow focus:ring-1 focus:ring-sky-500 focus:border-sky-500 outline-none">
+                                    <button type="submit" class="text-xs bg-green-500 hover:bg-green-600 text-white px-2.5 py-1.5 rounded-md transition">追加</button>
+                                </form>
+                            </div>
                         </div>
-                        <div class="flex items-center gap-3">
+                        <!-- タスク操作ボタン -->
+                        <div class="flex items-center gap-3 ml-4 flex-shrink-0">
                             <span class="text-xs text-slate-400 hidden sm:inline">ID: {{ task.id }}</span>
                             <div class="flex items-center gap-2">
-                                <a href="{{ url_for('edit_task', task_id=task.id) }}" class="text-slate-400 hover:text-blue-500 transition">
-                                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="w-6 h-6">
-                                        <path d="M21.731 2.269a2.625 2.625 0 0 0-3.712 0l-1.157 1.157 3.712 3.712 1.157-1.157a2.625 2.625 0 0 0 0-3.712ZM19.513 8.199l-3.712-3.712-8.4 8.4a5.25 5.25 0 0 0-1.32 2.214l-.8 2.685a.75.75 0 0 0 .933.933l2.685-.8a5.25 5.25 0 0 0 2.214-1.32l8.4-8.4Z" />
-                                        <path d="M5.25 5.25a3 3 0 0 0-3 3v10.5a3 3 0 0 0 3 3h10.5a3 3 0 0 0 3-3V13.5a.75.75 0 0 0-1.5 0v5.25a1.5 1.5 0 0 1-1.5 1.5H5.25a1.5 1.5 0 0 1-1.5-1.5V8.25a1.5 1.5 0 0 1 1.5-1.5h5.25a.75.75 0 0 0 0-1.5H5.25Z" />
-                                    </svg>
+                                <a href="{{ url_for('edit_task', task_id=task.id) }}" class="text-slate-400 hover:text-blue-500 transition" title="編集">
+                                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="w-5 h-5 sm:w-6 sm:h-6"><path d="M21.731 2.269a2.625 2.625 0 0 0-3.712 0l-1.157 1.157 3.712 3.712 1.157-1.157a2.625 2.625 0 0 0 0-3.712ZM19.513 8.199l-3.712-3.712-8.4 8.4a5.25 5.25 0 0 0-1.32 2.214l-.8 2.685a.75.75 0 0 0 .933.933l2.685-.8a5.25 5.25 0 0 0 2.214-1.32l8.4-8.4Z" /><path d="M5.25 5.25a3 3 0 0 0-3 3v10.5a3 3 0 0 0 3 3h10.5a3 3 0 0 0 3-3V13.5a.75.75 0 0 0-1.5 0v5.25a1.5 1.5 0 0 1-1.5 1.5H5.25a1.5 1.5 0 0 1-1.5-1.5V8.25a1.5 1.5 0 0 1 1.5-1.5h5.25a.75.75 0 0 0 0-1.5H5.25Z" /></svg>
                                 </a>
-                                <a href="{{ url_for('delete_task', task_id=task.id) }}" class="text-slate-400 hover:text-red-500 transition delete-task-btn"> {# クラス追加 #}
-                                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="w-6 h-6">
-                                        <path fill-rule="evenodd" d="M16.5 4.478v.227a48.816 48.816 0 0 1 3.878.512.75.75 0 1 1-.256 1.478l-.209-.035-1.005 13.006a.75.75 0 0 1-.749.684H7.08a.75.75 0 0 1-.749-.684L5.33 6.63a.75.75 0 0 1-.256-1.478A48.567 48.567 0 0 1 9 4.705v-.227c0-1.564 1.213-2.9 2.816-2.9h.368c1.603 0 2.816 1.336 2.816 2.9ZM12 6.25a.75.75 0 0 1 .75.75v8.5a.75.75 0 0 1-1.5 0v-8.5a.75.75 0 0 1 .75-.75Z" clip-rule="evenodd" />
-                                    </svg>
+                                <a href="{{ url_for('delete_task', task_id=task.id) }}" class="text-slate-400 hover:text-red-500 transition delete-task-btn" title="削除"> {# クラス追加 #}
+                                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="w-5 h-5 sm:w-6 sm:h-6"><path fill-rule="evenodd" d="M16.5 4.478v.227a48.816 48.816 0 0 1 3.878.512.75.75 0 1 1-.256 1.478l-.209-.035-1.005 13.006a.75.75 0 0 1-.749.684H7.08a.75.75 0 0 1-.749-.684L5.33 6.63a.75.75 0 0 1-.256-1.478A48.567 48.567 0 0 1 9 4.705v-.227c0-1.564 1.213-2.9 2.816-2.9h.368c1.603 0 2.816 1.336 2.816 2.9ZM12 6.25a.75.75 0 0 1 .75.75v8.5a.75.75 0 0 1-1.5 0v-8.5a.75.75 0 0 1 .75-.75Z" clip-rule="evenodd" /></svg>
                                 </a>
                             </div>
                         </div>
@@ -332,6 +389,62 @@ document.addEventListener('DOMContentLoaded', function() {
                     }
                 }).catch(error => displayFlashMessage('タスクの削除中にエラー。', 'danger'));
             }
+        }
+    });
+
+    // サブタスクのチェックボックス変更イベント (イベントデリゲーション)
+    taskList.addEventListener('change', function(event) {
+        const target = event.target;
+        // サブタスクのチェックボックスが変更された場合
+        if (target.matches('input.subtask-checkbox[name="subtask_completed"]')) {
+            const form = target.closest('form.subtask-toggle-form'); // フォームを特定
+            if (!form) return;
+            const url = form.action;
+
+            fetch(url, {
+                method: 'POST',
+                headers: {
+                    'X-Requested-With': 'XMLHttpRequest',
+                    // CSRFトークンが必要な場合はヘッダーに追加
+                },
+                // body: new FormData(form) // フォームデータを送信する場合
+            })
+            .then(response => {
+                if (!response.ok) {
+                    return response.json().then(errData => {
+                        const error = new Error(errData.message || `サーバーエラー (HTTP ${response.status})`);
+                        error.data = errData;
+                        error.status = response.status;
+                        throw error;
+                    }).catch(() => {
+                        throw new Error(`サーバーエラー (HTTP ${response.status})`);
+                    });
+                }
+                return response.json();
+            })
+            .then(result => {
+                displayFlashMessage(result.message, result.status === 'success' ? 'success' : (result.status === 'error' ? 'danger' : 'info'));
+                if (result.status === 'success' && result.subtask) {
+                    const subtaskListItem = document.getElementById(`subtask-${result.subtask.id}`);
+                    const subtaskLabel = subtaskListItem.querySelector('label');
+                    target.checked = result.subtask.completed; // チェック状態をサーバーからのレスポンスで更新
+                    if (result.subtask.completed) {
+                        subtaskLabel.classList.add('line-through');
+                        subtaskListItem.classList.replace('text-slate-700', 'text-slate-400');
+                    } else {
+                        subtaskLabel.classList.remove('line-through');
+                        subtaskListItem.classList.replace('text-slate-400', 'text-slate-700');
+                    }
+                }
+            })
+            .catch(error => {
+                console.error('Subtask toggle error:', error);
+                let errorMessage = 'サブタスクの状態更新中にエラーが発生しました。';
+                if (error && error.message) errorMessage = error.message;
+                displayFlashMessage(errorMessage, 'danger');
+                // エラー発生時はチェックボックスの状態を元に戻す (UIとデータの不整合を防ぐ)
+                target.checked = !target.checked;
+            });
         }
     });
 
