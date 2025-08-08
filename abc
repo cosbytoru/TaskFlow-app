@@ -1,5 +1,5 @@
 '================================================================================
-' 概要：ファイル比較・差分レポート作成マクロ (最終版)
+' 概要：ファイル比較・差分レポート作成マクロ (性能改善版)
 ' 機能：① TSV vs Excel の比較
 '       ② Excel vs Excel の比較
 '================================================================================
@@ -15,21 +15,17 @@ Option Explicit
 ' ■■■ Excelファイル と Excelファイル を比較する場合 ■■■
 Public Sub RunExcelToExcelComparison()
 
-    Dim sourceFolderPath As String
-    Dim targetFolderPath As String
+    Dim sourceFolderPath As String, targetFolderPath As String
     Dim sourceSuffix As String, targetSuffix As String
     
-    ' --- 接尾辞を設定（シート名が重複しないように） ---
     sourceSuffix = "_excel1"
     targetSuffix = "_excel2"
 
-    ' --- フォルダを選択 ---
     With Application.FileDialog(4) ' msoFileDialogFolderPicker
         .Title = "【ステップ1/2】 比較元 (Excel ①) のフォルダを選択してください"
         If .Show = False Then GoTo Cancelled
         sourceFolderPath = .SelectedItems(1)
     End With
-
     With Application.FileDialog(4) ' msoFileDialogFolderPicker
         .Title = "【ステップ2/2】 比較先 (Excel ②) のフォルダを選択してください"
         If .Show = False Then GoTo Cancelled
@@ -38,11 +34,12 @@ Public Sub RunExcelToExcelComparison()
     
     On Error GoTo ErrorHandler_All
     
-    '--- 実行中であることを示す設定 ---
+    '--- 実行中であることを示す設定 & 性能改善設定 ---
     Application.ScreenUpdating = False
     Application.DisplayAlerts = False
-    Application.Cursor = xlWait 'マウスカーソルを「処理中」に変更
-    
+    Application.Cursor = xlWait
+    Application.Calculation = xlCalculationManual '★自動計算を停止
+
     ' --- 各処理を連続実行 ---
     Application.StatusBar = "ステップ1/3: 比較元(Excel①)の結合処理を実行中です..."
     CombineXlsxFilesByMaster sourceFolderPath, sourceSuffix
@@ -58,37 +55,31 @@ Public Sub RunExcelToExcelComparison()
 Cancelled:
     MsgBox "処理がキャンセルされました。", vbExclamation
     GoTo CleanUp
-
 Completed:
     MsgBox "全ての処理が完了しました。", vbInformation
     GoTo CleanUp
-
 ErrorHandler_All:
-    MsgBox "一括処理中にエラーが発生しました。" & vbCrLf & vbCrLf & _
-           "エラー番号: " & Err.Number & vbCrLf & _
-           "エラー内容: " & Err.Description, vbCritical
+    MsgBox "一括処理中にエラーが発生しました。" & vbCrLf & vbCrLf & "エラー番号: " & Err.Number & vbCrLf & "エラー内容: " & Err.Description, vbCritical
 CleanUp:
     '--- 設定を元に戻す ---
     Application.ScreenUpdating = True
     Application.DisplayAlerts = True
-    Application.Cursor = xlDefault 'マウスカーソルを元に戻す
-    Application.StatusBar = False   'ステータスバーの表示を元に戻す
+    Application.Cursor = xlDefault
+    Application.StatusBar = False
+    Application.Calculation = xlCalculationAutomatic '★自動計算を再開
 End Sub
 
 
 ' ■■■ TSVファイル と Excelファイル を比較する場合 ■■■
 Public Sub RunAllProcesses()
 
-    Dim tsvFolderPath As String
-    Dim xlsxFolderPath As String
+    Dim tsvFolderPath As String, xlsxFolderPath As String
 
-    ' --- フォルダを選択 ---
     With Application.FileDialog(4) ' msoFileDialogFolderPicker
         .Title = "【ステップ1/2】 TSVファイルが保存されているフォルダを選択してください"
         If .Show = False Then GoTo Cancelled
         tsvFolderPath = .SelectedItems(1)
     End With
-
     With Application.FileDialog(4) ' msoFileDialogFolderPicker
         .Title = "【ステップ2/2】 XLSXファイルが保存されているフォルダを選択してください"
         If .Show = False Then GoTo Cancelled
@@ -97,10 +88,11 @@ Public Sub RunAllProcesses()
     
     On Error GoTo ErrorHandler_All
     
-    '--- 実行中であることを示す設定 ---
+    '--- 実行中であることを示す設定 & 性能改善設定 ---
     Application.ScreenUpdating = False
     Application.DisplayAlerts = False
-    Application.Cursor = xlWait 'マウスカーソルを「処理中」に変更
+    Application.Cursor = xlWait
+    Application.Calculation = xlCalculationManual '★自動計算を停止
     
     ' --- 各処理を連続実行 ---
     Application.StatusBar = "ステップ1/3: TSVファイルの結合処理を実行中です..."
@@ -117,21 +109,18 @@ Public Sub RunAllProcesses()
 Cancelled:
     MsgBox "処理がキャンセルされました。", vbExclamation
     GoTo CleanUp
-
 Completed:
     MsgBox "全ての処理が完了しました。", vbInformation
     GoTo CleanUp
-
 ErrorHandler_All:
-    MsgBox "一括処理中にエラーが発生しました。" & vbCrLf & vbCrLf & _
-           "エラー番号: " & Err.Number & vbCrLf & _
-           "エラー内容: " & Err.Description, vbCritical
+    MsgBox "一括処理中にエラーが発生しました。" & vbCrLf & vbCrLf & "エラー番号: " & Err.Number & vbCrLf & "エラー内容: " & Err.Description, vbCritical
 CleanUp:
     '--- 設定を元に戻す ---
     Application.ScreenUpdating = True
     Application.DisplayAlerts = True
-    Application.Cursor = xlDefault 'マウスカーソルを元に戻す
-    Application.StatusBar = False   'ステータスバーの表示を元に戻す
+    Application.Cursor = xlDefault
+    Application.StatusBar = False
+    Application.Calculation = xlCalculationAutomatic '★自動計算を再開
 End Sub
 
 
