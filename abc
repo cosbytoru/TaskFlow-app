@@ -1,65 +1,137 @@
 '================================================================================
-' 概要：指定したフォルダ内のTSV/XLSXファイルを、ファイル名に含まれるマスタ名ごとに
-'       新しいシートへ結合し、両者の差分をレポートするマクロ (一括処理対応版)
+' 概要：ファイル比較・差分レポート作成マクロ (最終版)
+' 機能：① TSV vs Excel の比較
+'       ② Excel vs Excel の比較
 '================================================================================
 
 Option Explicit
 
 '################################################################################
 '#                                                                              #
-'#     ★★★★   今後、実行するのはこのマクロだけです   ★★★★     #
+'#         ★★★★★   実行するマクロを選択してください   ★★★★★         #
 '#                                                                              #
 '################################################################################
+
+' ■■■ Excelファイル と Excelファイル を比較する場合 ■■■
+Public Sub RunExcelToExcelComparison()
+
+    Dim sourceFolderPath As String
+    Dim targetFolderPath As String
+    Dim sourceSuffix As String, targetSuffix As String
+    
+    ' --- 接尾辞を設定（シート名が重複しないように） ---
+    sourceSuffix = "_excel1"
+    targetSuffix = "_excel2"
+
+    ' --- フォルダを選択 ---
+    With Application.FileDialog(4) ' msoFileDialogFolderPicker
+        .Title = "【ステップ1/2】 比較元 (Excel ①) のフォルダを選択してください"
+        If .Show = False Then GoTo Cancelled
+        sourceFolderPath = .SelectedItems(1)
+    End With
+
+    With Application.FileDialog(4) ' msoFileDialogFolderPicker
+        .Title = "【ステップ2/2】 比較先 (Excel ②) のフォルダを選択してください"
+        If .Show = False Then GoTo Cancelled
+        targetFolderPath = .SelectedItems(1)
+    End With
+    
+    On Error GoTo ErrorHandler_All
+    
+    '--- 実行中であることを示す設定 ---
+    Application.ScreenUpdating = False
+    Application.DisplayAlerts = False
+    Application.Cursor = xlWait 'マウスカーソルを「処理中」に変更
+    
+    ' --- 各処理を連続実行 ---
+    Application.StatusBar = "ステップ1/3: 比較元(Excel①)の結合処理を実行中です..."
+    CombineXlsxFilesByMaster sourceFolderPath, sourceSuffix
+    
+    Application.StatusBar = "ステップ2/3: 比較先(Excel②)の結合処理を実行中です..."
+    CombineXlsxFilesByMaster targetFolderPath, targetSuffix
+    
+    Application.StatusBar = "ステップ3/3: 差分レポート作成処理を実行中です..."
+    CreateDiffReport sourceSuffix, targetSuffix
+
+    GoTo Completed
+
+Cancelled:
+    MsgBox "処理がキャンセルされました。", vbExclamation
+    GoTo CleanUp
+
+Completed:
+    MsgBox "全ての処理が完了しました。", vbInformation
+    GoTo CleanUp
+
+ErrorHandler_All:
+    MsgBox "一括処理中にエラーが発生しました。" & vbCrLf & vbCrLf & _
+           "エラー番号: " & Err.Number & vbCrLf & _
+           "エラー内容: " & Err.Description, vbCritical
+CleanUp:
+    '--- 設定を元に戻す ---
+    Application.ScreenUpdating = True
+    Application.DisplayAlerts = True
+    Application.Cursor = xlDefault 'マウスカーソルを元に戻す
+    Application.StatusBar = False   'ステータスバーの表示を元に戻す
+End Sub
+
+
+' ■■■ TSVファイル と Excelファイル を比較する場合 ■■■
 Public Sub RunAllProcesses()
 
     Dim tsvFolderPath As String
     Dim xlsxFolderPath As String
 
-    ' --- ステップ1: TSVフォルダの選択 ---
+    ' --- フォルダを選択 ---
     With Application.FileDialog(4) ' msoFileDialogFolderPicker
         .Title = "【ステップ1/2】 TSVファイルが保存されているフォルダを選択してください"
-        If .Show = False Then
-            MsgBox "処理がキャンセルされました。", vbExclamation
-            Exit Sub
-        End If
+        If .Show = False Then GoTo Cancelled
         tsvFolderPath = .SelectedItems(1)
     End With
 
-    ' --- ステップ2: XLSXフォルダの選択 ---
     With Application.FileDialog(4) ' msoFileDialogFolderPicker
         .Title = "【ステップ2/2】 XLSXファイルが保存されているフォルダを選択してください"
-        If .Show = False Then
-            MsgBox "処理がキャンセルされました。", vbExclamation
-            Exit Sub
-        End If
+        If .Show = False Then GoTo Cancelled
         xlsxFolderPath = .SelectedItems(1)
     End With
     
     On Error GoTo ErrorHandler_All
+    
+    '--- 実行中であることを示す設定 ---
     Application.ScreenUpdating = False
     Application.DisplayAlerts = False
-
-    ' --- ステップ3: 各処理を連続実行 ---
-    Debug.Print "TSV結合処理を開始..."
+    Application.Cursor = xlWait 'マウスカーソルを「処理中」に変更
+    
+    ' --- 各処理を連続実行 ---
+    Application.StatusBar = "ステップ1/3: TSVファイルの結合処理を実行中です..."
     CombineTsvFilesByMaster tsvFolderPath
     
-    Debug.Print "XLSX結合処理を開始..."
-    CombineXlsxFilesByMaster xlsxFolderPath
+    Application.StatusBar = "ステップ2/3: Excelファイルの結合処理を実行中です..."
+    CombineXlsxFilesByMaster xlsxFolderPath, "_xlsx"
     
-    Debug.Print "差分レポート作成処理を開始..."
-    CreateDiffReport
+    Application.StatusBar = "ステップ3/3: 差分レポート作成処理を実行中です..."
+    CreateDiffReport "", "_xlsx"
 
-    Application.ScreenUpdating = True
-    Application.DisplayAlerts = True
+    GoTo Completed
+
+Cancelled:
+    MsgBox "処理がキャンセルされました。", vbExclamation
+    GoTo CleanUp
+
+Completed:
     MsgBox "全ての処理が完了しました。", vbInformation
-    Exit Sub
+    GoTo CleanUp
 
 ErrorHandler_All:
-    Application.ScreenUpdating = True
-    Application.DisplayAlerts = True
     MsgBox "一括処理中にエラーが発生しました。" & vbCrLf & vbCrLf & _
            "エラー番号: " & Err.Number & vbCrLf & _
            "エラー内容: " & Err.Description, vbCritical
+CleanUp:
+    '--- 設定を元に戻す ---
+    Application.ScreenUpdating = True
+    Application.DisplayAlerts = True
+    Application.Cursor = xlDefault 'マウスカーソルを元に戻す
+    Application.StatusBar = False   'ステータスバーの表示を元に戻す
 End Sub
 
 
@@ -91,7 +163,7 @@ Private Function CleanTsvField(ByVal field As String) As String
 End Function
 
 
-' ■■■ メイン処理① (TSVファイル結合) ■■■
+' ■■■ 内部処理 (TSVファイル結合) ■■■
 Private Sub CombineTsvFilesByMaster(ByVal folderPath As String)
 
     Const HEADER_ROW_TEXT As String = "ファイル名,ヘッダは無し,,,"
@@ -140,26 +212,23 @@ Private Sub CombineTsvFilesByMaster(ByVal folderPath As String)
         On Error Resume Next
         Set ws = Nothing
         Set ws = ThisWorkbook.Worksheets(sheetName)
-        On Error GoTo 0 ' エラーハンドリングを一旦解除
+        On Error GoTo 0
     
         If ws Is Nothing Then
             Set ws = ThisWorkbook.Worksheets.Add(After:=ThisWorkbook.Worksheets(ThisWorkbook.Worksheets.Count))
             ws.name = sheetName
-            ws.Cells.NumberFormat = "@"
         Else
             ws.Cells.ClearContents
-            ws.Cells.NumberFormat = "@"
         End If
+        ws.Cells.NumberFormat = "@"
 
         Dim headers() As String
         headers = Split(HEADER_ROW_TEXT, ",")
         ws.Cells(1, 1).Resize(1, UBound(headers) + 1).Value = headers
-
         lineCounter = 2
 
         Dim fileList As Collection
         Set fileList = fileGroups(masterName)
-
         Set stream = CreateObject("ADODB.Stream")
         stream.Charset = "UTF-8"
     
@@ -168,13 +237,11 @@ Private Sub CombineTsvFilesByMaster(ByVal folderPath As String)
             fileInfo = fileList.Item(i)
             filePath = fileInfo(0)
             sourceName = fileInfo(1)
-
             stream.Open
             stream.LoadFromFile filePath
 
             Do While Not stream.EOS
                 textLine = stream.ReadText(-2)
-
                 If Trim(textLine) <> "" Then
                     lineParts = Split(textLine, vbTab)
                     ReDim writeData(0 To UBound(lineParts) + 1)
@@ -186,10 +253,8 @@ Private Sub CombineTsvFilesByMaster(ByVal folderPath As String)
                     lineCounter = lineCounter + 1
                 End If
             Loop
-
             stream.Close
         Next i
-
         ws.Columns.AutoFit
     Next masterName
     
@@ -208,9 +273,9 @@ CleanUp_Tsv:
 End Sub
 
 '================================================================================
-' ■■■ メイン処理② (XLSXファイル結合) ■■■
+' ■■■ 内部処理 (XLSXファイル結合) ■■■
 '================================================================================
-Private Sub CombineXlsxFilesByMaster(ByVal folderPath As String)
+Private Sub CombineXlsxFilesByMaster(ByVal folderPath As String, ByVal sheetSuffix As String)
 
     Const HEADER_ROW As Long = 4
     Const DEFAULT_DATA_START_ROW As Long = 5
@@ -254,13 +319,13 @@ Private Sub CombineXlsxFilesByMaster(ByVal folderPath As String)
     End If
     
     For Each masterName In fileGroups.Keys
-        sheetName = SanitizeSheetName(CStr(masterName) & "_xlsx")
+        sheetName = SanitizeSheetName(CStr(masterName) & sheetSuffix)
         
         Dim dataStartRow As Long
         Dim fixedColumnCount As Long
         
         Select Case masterName
-            Case "事業体マスタ"
+            Case "事業体マスタ":
                 dataStartRow = 10
                 fixedColumnCount = 0
             Case Else
@@ -269,19 +334,13 @@ Private Sub CombineXlsxFilesByMaster(ByVal folderPath As String)
         End Select
     
         On Error Resume Next
-        Set ws = Nothing
-        Set ws = ThisWorkbook.Worksheets(sheetName)
-        On Error GoTo 0 'エラーハンドリングを一旦解除
-    
-        If ws Is Nothing Then
-            Set ws = ThisWorkbook.Worksheets.Add(After:=ThisWorkbook.Worksheets(ThisWorkbook.Worksheets.Count))
-            ws.name = sheetName
-            ws.Cells.NumberFormat = "@"
-        Else
-            ws.Cells.ClearContents
-            ws.Cells.NumberFormat = "@"
-        End If
-
+        ThisWorkbook.Worksheets(sheetName).Delete
+        On Error GoTo 0
+        
+        Set ws = ThisWorkbook.Worksheets.Add(After:=ThisWorkbook.Worksheets(ThisWorkbook.Worksheets.Count))
+        ws.name = sheetName
+        ws.Cells.NumberFormat = "@"
+        
         lineCounter = 2
 
         Dim fileList As Collection
@@ -370,7 +429,6 @@ Private Sub CombineXlsxFilesByMaster(ByVal folderPath As String)
 
             sourceWb.Close SaveChanges:=False
         Next i
-
         ws.Columns.AutoFit
     Next masterName
     
@@ -389,7 +447,7 @@ End Sub
 
 
 '================================================================================
-' ■■■ メイン処理③ (差分レポート作成) ■■■
+' ■■■ 内部処理 (差分レポート作成) ■■■
 '================================================================================
 
 Private Function GetCompositeKey(ByVal ws As Worksheet, ByVal rowNum As Long, ByVal keyCols As Variant) As String
@@ -403,7 +461,7 @@ Private Function GetCompositeKey(ByVal ws As Worksheet, ByVal rowNum As Long, By
     GetCompositeKey = key
 End Function
 
-Private Sub CreateDiffReport()
+Private Sub CreateDiffReport(ByVal sourceSuffix As String, ByVal targetSuffix As String)
 
     Const ADDED_COLOR As Long = 5296274
     Const DELETED_COLOR As Long = 12632256
@@ -411,9 +469,9 @@ Private Sub CreateDiffReport()
     Const MODIFIED_CELL_COLOR As Long = 49407
     Const DIFF_CELL_FONT_COLOR As Long = vbRed
     
-    Dim tsvWs As Worksheet, xlsxWs As Worksheet, diffWs As Worksheet
+    Dim sourceWs As Worksheet, targetWs As Worksheet, diffWs As Worksheet
     Dim tsvDict As Object
-    Dim tsvSheetName As String, masterName As String, xlsxKey As String, diffSheetName As String
+    Dim sourceSheetName As String, masterName As String, targetKey As String, diffSheetName As String
     Dim keyCols As Variant, key As Variant
     Dim lastRowTsv As Long, lastRowXlsx As Long, lastColTsv As Long, lastColXlsx As Long, maxCol As Long
     Dim r As Long, c As Long, tsvRowNum As Long, diffRow As Long
@@ -422,17 +480,17 @@ Private Sub CreateDiffReport()
     
     processedCount = 0
     
-    For Each xlsxWs In ThisWorkbook.Worksheets
-        If xlsxWs.name Like "*_xlsx" Then
-            tsvSheetName = Replace(xlsxWs.name, "_xlsx", "")
-            masterName = tsvSheetName
+    For Each targetWs In ThisWorkbook.Worksheets
+        If targetWs.name Like "*" & targetSuffix Then
+            sourceSheetName = Replace(targetWs.name, targetSuffix, sourceSuffix)
+            masterName = Replace(targetWs.name, targetSuffix, "")
             
-            Set tsvWs = Nothing
+            Set sourceWs = Nothing
             On Error Resume Next
-            Set tsvWs = ThisWorkbook.Worksheets(tsvSheetName)
-            On Error GoTo 0 ' エラーハンドリングを一旦解除
+            Set sourceWs = ThisWorkbook.Worksheets(sourceSheetName)
+            On Error GoTo 0
             
-            If Not tsvWs Is Nothing Then
+            If Not sourceWs Is Nothing Then
                 keyIsDefined = True
                 Select Case masterName
                     Case "事業体マスタ":   keyCols = Array(1, 4)
@@ -445,51 +503,51 @@ Private Sub CreateDiffReport()
                 If keyIsDefined Then
                     processedCount = processedCount + 1
                     
-                    diffSheetName = tsvSheetName & "_diff"
+                    diffSheetName = masterName & "_diff"
                     
                     On Error Resume Next
                     ThisWorkbook.Worksheets(diffSheetName).Delete
-                    On Error GoTo 0 ' エラーハンドリングを一旦解除
+                    On Error GoTo 0
                     
-                    Set diffWs = ThisWorkbook.Worksheets.Add(After:=xlsxWs)
+                    Set diffWs = ThisWorkbook.Worksheets.Add(After:=targetWs)
                     diffWs.name = diffSheetName
                     diffWs.Cells.NumberFormat = "@"
                     
-                    lastColXlsx = xlsxWs.Cells(1, xlsxWs.Columns.Count).End(xlToLeft).Column
+                    lastColXlsx = targetWs.Cells(1, targetWs.Columns.Count).End(xlToLeft).Column
                     diffWs.Cells(1, 1).Value = "状態"
-                    diffWs.Cells(1, 2).Resize(1, lastColXlsx).Value = xlsxWs.Range("A1").Resize(1, lastColXlsx).Value
+                    diffWs.Cells(1, 2).Resize(1, lastColXlsx).Value = targetWs.Range("A1").Resize(1, lastColXlsx).Value
                     diffWs.Rows(1).Font.Bold = True
 
                     diffRow = 2
                     
                     Set tsvDict = CreateObject("Scripting.Dictionary")
-                    lastRowTsv = tsvWs.Cells(tsvWs.Rows.Count, 1).End(xlUp).Row
+                    lastRowTsv = sourceWs.Cells(sourceWs.Rows.Count, 1).End(xlUp).Row
                     If lastRowTsv >= 2 Then
                         For r = 2 To lastRowTsv
-                            key = GetCompositeKey(tsvWs, r, keyCols)
+                            key = GetCompositeKey(sourceWs, r, keyCols)
                             If Not tsvDict.Exists(key) Then tsvDict.Add key, r
                         Next r
                     End If
                     
-                    lastRowXlsx = xlsxWs.Cells(xlsxWs.Rows.Count, 1).End(xlUp).Row
+                    lastRowXlsx = targetWs.Cells(targetWs.Rows.Count, 1).End(xlUp).Row
                     If lastRowXlsx >= 2 Then
                         For r = 2 To lastRowXlsx
-                            xlsxKey = GetCompositeKey(xlsxWs, r, keyCols)
+                            targetKey = GetCompositeKey(targetWs, r, keyCols)
                             
-                            If tsvDict.Exists(xlsxKey) Then
-                                tsvRowNum = tsvDict(xlsxKey)
+                            If tsvDict.Exists(targetKey) Then
+                                tsvRowNum = tsvDict(targetKey)
                                 isModified = False
                                 
-                                lastColTsv = tsvWs.Cells(tsvRowNum, tsvWs.Columns.Count).End(xlToLeft).Column
-                                lastColXlsx = xlsxWs.Cells(r, xlsxWs.Columns.Count).End(xlToLeft).Column
+                                lastColTsv = sourceWs.Cells(tsvRowNum, sourceWs.Columns.Count).End(xlToLeft).Column
+                                lastColXlsx = targetWs.Cells(r, targetWs.Columns.Count).End(xlToLeft).Column
                                 maxCol = Application.WorksheetFunction.Max(lastColTsv, lastColXlsx)
                                 
-                                diffWs.Cells(diffRow, 2).Resize(1, maxCol).Value = xlsxWs.Cells(r, 1).Resize(1, maxCol).Value
+                                diffWs.Cells(diffRow, 2).Resize(1, maxCol).Value = targetWs.Cells(r, 1).Resize(1, maxCol).Value
                                 
                                 For c = 1 To maxCol
                                     Dim beforeVal As String, afterVal As String
-                                    beforeVal = CStr(tsvWs.Cells(tsvRowNum, c).Value)
-                                    afterVal = CStr(xlsxWs.Cells(r, c).Value)
+                                    beforeVal = CStr(sourceWs.Cells(tsvRowNum, c).Value)
+                                    afterVal = CStr(targetWs.Cells(r, c).Value)
 
                                     If beforeVal <> afterVal Then
                                         isModified = True
@@ -519,11 +577,11 @@ Private Sub CreateDiffReport()
                                     diffWs.Cells(diffRow, 1).Value = "変更なし"
                                 End If
                                 
-                                tsvDict.Remove xlsxKey
+                                tsvDict.Remove targetKey
                                 diffRow = diffRow + 1
                             Else
-                                lastColXlsx = xlsxWs.Cells(r, xlsxWs.Columns.Count).End(xlToLeft).Column
-                                diffWs.Cells(diffRow, 2).Resize(1, lastColXlsx).Value = xlsxWs.Cells(r, 1).Resize(1, lastColXlsx).Value
+                                lastColXlsx = targetWs.Cells(r, targetWs.Columns.Count).End(xlToLeft).Column
+                                diffWs.Cells(diffRow, 2).Resize(1, lastColXlsx).Value = targetWs.Cells(r, 1).Resize(1, lastColXlsx).Value
                                 diffWs.Cells(diffRow, 1).Value = "追加"
                                 diffWs.Rows(diffRow).Interior.Color = ADDED_COLOR
                                 diffRow = diffRow + 1
@@ -534,8 +592,8 @@ Private Sub CreateDiffReport()
                     If tsvDict.Count > 0 Then
                         For Each key In tsvDict.Keys
                             tsvRowNum = tsvDict(key)
-                            lastColTsv = tsvWs.Cells(tsvRowNum, tsvWs.Columns.Count).End(xlToLeft).Column
-                            diffWs.Cells(diffRow, 2).Resize(1, lastColTsv).Value = tsvWs.Cells(tsvRowNum, 1).Resize(1, lastColTsv).Value
+                            lastColTsv = sourceWs.Cells(tsvRowNum, sourceWs.Columns.Count).End(xlToLeft).Column
+                            diffWs.Cells(diffRow, 2).Resize(1, lastColTsv).Value = sourceWs.Cells(tsvRowNum, 1).Resize(1, lastColTsv).Value
                             diffWs.Cells(diffRow, 1).Value = "削除"
                             diffWs.Rows(diffRow).Interior.Color = DELETED_COLOR
                             diffRow = diffRow + 1
@@ -546,11 +604,12 @@ Private Sub CreateDiffReport()
                 End If
             End If
         End If
-    Next xlsxWs
+    Next targetWs
     
-    If processedCount = 0 Then
-        MsgBox "比較対象となるシートの組み合わせが見つかりませんでした。" & vbCrLf & _
-               "（例: 「Mst_A」と「Mst_A_xlsx」のペアが必要です）", vbExclamation
+    If processedCount > 0 Then
+        '完了メッセージは呼び出し元で表示するため、ここでは表示しない
+    Else
+        MsgBox "比較対象となるシートの組み合わせが見つかりませんでした。", vbInformation
     End If
     
 End Sub
