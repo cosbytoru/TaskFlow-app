@@ -1,9 +1,67 @@
 '================================================================================
 ' 概要：指定したフォルダ内のTSV/XLSXファイルを、ファイル名に含まれるマスタ名ごとに
-'       新しいシートへ結合し、両者の差分をレポートするマクロ (最終修正版)
+'       新しいシートへ結合し、両者の差分をレポートするマクロ (一括処理対応版)
 '================================================================================
 
 Option Explicit
+
+'################################################################################
+'#                                                                              #
+'#     ★★★★   今後、実行するのはこのマクロだけです   ★★★★     #
+'#                                                                              #
+'################################################################################
+Public Sub RunAllProcesses()
+
+    Dim tsvFolderPath As String
+    Dim xlsxFolderPath As String
+
+    ' --- ステップ1: TSVフォルダの選択 ---
+    With Application.FileDialog(4) ' msoFileDialogFolderPicker
+        .Title = "【ステップ1/2】 TSVファイルが保存されているフォルダを選択してください"
+        If .Show = False Then
+            MsgBox "処理がキャンセルされました。", vbExclamation
+            Exit Sub
+        End If
+        tsvFolderPath = .SelectedItems(1)
+    End With
+
+    ' --- ステップ2: XLSXフォルダの選択 ---
+    With Application.FileDialog(4) ' msoFileDialogFolderPicker
+        .Title = "【ステップ2/2】 XLSXファイルが保存されているフォルダを選択してください"
+        If .Show = False Then
+            MsgBox "処理がキャンセルされました。", vbExclamation
+            Exit Sub
+        End If
+        xlsxFolderPath = .SelectedItems(1)
+    End With
+    
+    On Error GoTo ErrorHandler_All
+    Application.ScreenUpdating = False
+    Application.DisplayAlerts = False
+
+    ' --- ステップ3: 各処理を連続実行 ---
+    Debug.Print "TSV結合処理を開始..."
+    CombineTsvFilesByMaster tsvFolderPath
+    
+    Debug.Print "XLSX結合処理を開始..."
+    CombineXlsxFilesByMaster xlsxFolderPath
+    
+    Debug.Print "差分レポート作成処理を開始..."
+    CreateDiffReport
+
+    Application.ScreenUpdating = True
+    Application.DisplayAlerts = True
+    MsgBox "全ての処理が完了しました。", vbInformation
+    Exit Sub
+
+ErrorHandler_All:
+    Application.ScreenUpdating = True
+    Application.DisplayAlerts = True
+    MsgBox "一括処理中にエラーが発生しました。" & vbCrLf & vbCrLf & _
+           "エラー番号: " & Err.Number & vbCrLf & _
+           "エラー内容: " & Err.Description, vbCritical
+End Sub
+
 
 ' ■■■ ヘルパー関数①: シート名を安全な文字列にする ■■■
 Private Function SanitizeSheetName(ByVal name As String) As String
@@ -25,11 +83,8 @@ Private Function CleanTsvField(ByVal field As String) As String
     Dim temp As String
     temp = field
 
-    ' フィールドがダブルクォーテーションで囲まれているかチェック
     If Len(temp) >= 2 And Left(temp, 1) = """" And Right(temp, 1) = """" Then
-        ' 両端の " を削除
         temp = Mid(temp, 2, Len(temp) - 2)
-        ' 内部でエスケープされている "" を " (一つ) に置換
         temp = Replace(temp, """""", """")
     End If
     CleanTsvField = temp
@@ -37,33 +92,21 @@ End Function
 
 
 ' ■■■ メイン処理① (TSVファイル結合) ■■■
-Public Sub CombineTsvFilesByMaster()
+Private Sub CombineTsvFilesByMaster(ByVal folderPath As String)
 
-    ' ★★★ TSVファイルのヘッダー設定 (TSV自体にヘッダーが無い場合) ★★★
     Const HEADER_ROW_TEXT As String = "ファイル名,ヘッダは無し,,,"
     
-    ' --- 初期設定 ---
     Dim fso As Object, fileGroups As Object, targetFolder As Object, file As Object, stream As Object
-    Dim folderPath As String, textLine As String, sheetName As String, filePath As String, sourceName As String
+    Dim textLine As String, sheetName As String, filePath As String, sourceName As String
     Dim masterName As Variant
     Dim lineParts() As String, writeData() As String
     Dim ws As Worksheet
     Dim lineCounter As Long, i As Long, j As Long
-
-    ' --- ユーザーにフォルダを選択させる ---
-    With Application.FileDialog(4) ' msoFileDialogFolderPicker
-        .Title = "TSVファイルが保存されているフォルダを選択してください"
-        If .Show = False Then Exit Sub
-        folderPath = .SelectedItems(1)
-    End With
     
-    ' --- オブジェクトを準備 ---
-    On Error GoTo ErrorHandler_Tsv
     Set fso = CreateObject("Scripting.FileSystemObject")
     Set fileGroups = CreateObject("Scripting.Dictionary")
     Set targetFolder = fso.GetFolder(folderPath)
     
-    ' --- ステップ1: ファイルをマスタ名でグループ化 & A列用の名前を抽出 ---
     For Each file In targetFolder.Files
         If LCase(file.name) Like "移行用シート_*.tsv" Then
             Dim baseName As String
@@ -91,16 +134,13 @@ Public Sub CombineTsvFilesByMaster()
         GoTo CleanUp_Tsv
     End If
     
-    Application.ScreenUpdating = False
-    
-    ' --- ステップ2: グループごとにシートを作成し、データを結合して書き込む ---
     For Each masterName In fileGroups.Keys
         sheetName = SanitizeSheetName(CStr(masterName))
     
         On Error Resume Next
         Set ws = Nothing
         Set ws = ThisWorkbook.Worksheets(sheetName)
-        On Error GoTo ErrorHandler_Tsv
+        On Error GoTo 0 ' エラーハンドリングを一旦解除
     
         If ws Is Nothing Then
             Set ws = ThisWorkbook.Worksheets.Add(After:=ThisWorkbook.Worksheets(ThisWorkbook.Worksheets.Count))
@@ -111,12 +151,11 @@ Public Sub CombineTsvFilesByMaster()
             ws.Cells.NumberFormat = "@"
         End If
 
-        ' 固定ヘッダーを1行目に書き込む
         Dim headers() As String
         headers = Split(HEADER_ROW_TEXT, ",")
         ws.Cells(1, 1).Resize(1, UBound(headers) + 1).Value = headers
 
-        lineCounter = 2 ' データは2行目から書き始める
+        lineCounter = 2
 
         Dim fileList As Collection
         Set fileList = fileGroups(masterName)
@@ -134,9 +173,9 @@ Public Sub CombineTsvFilesByMaster()
             stream.LoadFromFile filePath
 
             Do While Not stream.EOS
-                textLine = stream.ReadText(-2) ' 1行読む
+                textLine = stream.ReadText(-2)
 
-                If Trim(textLine) <> "" Then ' 空行はスキップ
+                If Trim(textLine) <> "" Then
                     lineParts = Split(textLine, vbTab)
                     ReDim writeData(0 To UBound(lineParts) + 1)
                     writeData(0) = sourceName
@@ -154,9 +193,6 @@ Public Sub CombineTsvFilesByMaster()
         ws.Columns.AutoFit
     Next masterName
     
-    Application.ScreenUpdating = True
-    MsgBox "TSVファイルの結合処理が完了しました。", vbInformation
-
 CleanUp_Tsv:
     On Error Resume Next
     Set ws = Nothing
@@ -169,53 +205,27 @@ CleanUp_Tsv:
         If stream.State = 1 Then stream.Close
         Set stream = Nothing
     End If
-    Application.ScreenUpdating = True
-    Exit Sub
-    
-ErrorHandler_Tsv:
-    MsgBox "TSVファイルの処理中にエラーが発生しました。" & vbCrLf & vbCrLf & _
-           "エラー番号: " & Err.Number & vbCrLf & _
-           "エラー内容: " & Err.Description, vbCritical
-    GoTo CleanUp_Tsv
 End Sub
 
 '================================================================================
 ' ■■■ メイン処理② (XLSXファイル結合) ■■■
 '================================================================================
-Public Sub CombineXlsxFilesByMaster()
+Private Sub CombineXlsxFilesByMaster(ByVal folderPath As String)
 
-    ' ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
-    ' ★                                                            ★
-    ' ★               Excelファイル用の設定                        ★
-    ' ★                                                            ★
-    ' ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
+    Const HEADER_ROW As Long = 4
+    Const DEFAULT_DATA_START_ROW As Long = 5
+    Const DATA_START_COL As Long = 2
 
-    ' 1. 読み込むExcelファイルのヘッダーとデータの【デフォルト】開始位置
-    Const HEADER_ROW As Long = 4     ' ヘッダーのある行 (4行目)
-    Const DEFAULT_DATA_START_ROW As Long = 5 ' デフォルトのデータ開始行
-    Const DATA_START_COL As Long = 2 ' データ開始列 (B列から)
-
-    ' --- 初期設定 ---
     Dim fso As Object, fileGroups As Object, targetFolder As Object, file As Object
-    Dim folderPath As String, sheetName As String, filePath As String, sourceName As String
+    Dim sheetName As String, filePath As String, sourceName As String
     Dim masterName As Variant
     Dim ws As Worksheet, sourceWb As Workbook, sourceWs As Worksheet
     Dim lineCounter As Long, i As Long
 
-    ' --- ユーザーにフォルダを選択させる ---
-    With Application.FileDialog(4) ' msoFileDialogFolderPicker
-        .Title = "XLSXファイルが保存されているフォルダを選択してください"
-        If .Show = False Then Exit Sub
-        folderPath = .SelectedItems(1)
-    End With
-    
-    ' --- オブジェクトを準備 ---
-    On Error GoTo ErrorHandler_Xlsx
     Set fso = CreateObject("Scripting.FileSystemObject")
     Set fileGroups = CreateObject("Scripting.Dictionary")
     Set targetFolder = fso.GetFolder(folderPath)
     
-    ' --- ステップ1: XLSXファイルをマスタ名でグループ化 ---
     For Each file In targetFolder.Files
         If LCase(file.name) Like "移行用シート_*.xlsx" Then
             Dim baseName As String
@@ -243,44 +253,25 @@ Public Sub CombineXlsxFilesByMaster()
         GoTo CleanUp_Xlsx
     End If
     
-    Application.ScreenUpdating = False
-    Application.DisplayAlerts = False ' Excelの警告を非表示
-    
-    ' --- ステップ2: グループごとにシートを作成し、データを結合 ---
     For Each masterName In fileGroups.Keys
         sheetName = SanitizeSheetName(CStr(masterName) & "_xlsx")
         
-        '--- 変数の準備 ---
         Dim dataStartRow As Long
         Dim fixedColumnCount As Long
-        
-        '----------------------------------------------------------------------
-        ' ★★★ マスタごとの個別設定エリア ★★★
-        '----------------------------------------------------------------------
-        ' ここでマスタごとの「データ開始行」と「取得する列数」を指定します。
-        ' fixedColumnCount を 0 にすると、列数は自動で検出されます。
         
         Select Case masterName
             Case "事業体マスタ"
                 dataStartRow = 10
-                fixedColumnCount = 0 ' 例: Y列までなら 24 を指定 (B列から数えて24列)
-                
-            ' --- 他のマスタもここに追加できます ---
-            'Case "スキームマスタ"
-            '    dataStartRow = 5
-            '    fixedColumnCount = 24 ' Y列まで取得
-            
+                fixedColumnCount = 0
             Case Else
-                ' 上記で指定されなかったマスタは、デフォルト設定を使います
                 dataStartRow = DEFAULT_DATA_START_ROW
-                fixedColumnCount = 0 ' 列数は自動検出
+                fixedColumnCount = 0
         End Select
-        '----------------------------------------------------------------------
     
         On Error Resume Next
         Set ws = Nothing
         Set ws = ThisWorkbook.Worksheets(sheetName)
-        On Error GoTo ErrorHandler_Xlsx
+        On Error GoTo 0 'エラーハンドリングを一旦解除
     
         If ws Is Nothing Then
             Set ws = ThisWorkbook.Worksheets.Add(After:=ThisWorkbook.Worksheets(ThisWorkbook.Worksheets.Count))
@@ -291,12 +282,11 @@ Public Sub CombineXlsxFilesByMaster()
             ws.Cells.NumberFormat = "@"
         End If
 
-        lineCounter = 2 ' データは2行目から書き始める
+        lineCounter = 2
 
         Dim fileList As Collection
         Set fileList = fileGroups(masterName)
         
-        ' ヘッダーを最初のファイルから動的に取得
         If fileList.Count > 0 Then
             Dim firstFileInfo As Variant
             firstFileInfo = fileList.Item(1)
@@ -342,12 +332,9 @@ Public Sub CombineXlsxFilesByMaster()
             lastRow = sourceWs.Cells(sourceWs.Rows.Count, DATA_START_COL).End(xlUp).Row
 
             If lastRow >= dataStartRow Then
-                ' 固定列数の指定があるか確認
                 If fixedColumnCount > 0 Then
-                    ' 固定列数を採用
                     lastCol = DATA_START_COL + fixedColumnCount - 1
                 Else
-                    ' 動的に最終列を判定
                     Dim headerLastCol As Long, dataLastCol As Long
                     headerLastCol = sourceWs.Cells(HEADER_ROW, sourceWs.Columns.Count).End(xlToLeft).Column
                     dataLastCol = sourceWs.Cells(dataStartRow, sourceWs.Columns.Count).End(xlToLeft).Column
@@ -362,7 +349,7 @@ Public Sub CombineXlsxFilesByMaster()
 
                 If IsArray(dataArray) Then
                     Dim writeData() As Variant
-                    Dim r As Long, c As Long
+                    Dim r As Long
                     For r = 1 To UBound(dataArray, 1)
                         ReDim writeData(1 To UBound(dataArray, 2) + 1)
                         writeData(1) = sourceName
@@ -387,12 +374,8 @@ Public Sub CombineXlsxFilesByMaster()
         ws.Columns.AutoFit
     Next masterName
     
-    MsgBox "XLSXファイルの結合処理が完了しました。", vbInformation
-
 CleanUp_Xlsx:
     On Error Resume Next
-    Application.ScreenUpdating = True
-    Application.DisplayAlerts = True
     Set ws = Nothing
     Set sourceWs = Nothing
     If Not sourceWb Is Nothing Then sourceWb.Close False
@@ -402,13 +385,6 @@ CleanUp_Xlsx:
     Set targetFolder = Nothing
     Set fileGroups = Nothing
     Set fso = Nothing
-    Exit Sub
-    
-ErrorHandler_Xlsx:
-    MsgBox "XLSXファイルの処理中にエラーが発生しました。" & vbCrLf & vbCrLf & _
-           "エラー番号: " & Err.Number & vbCrLf & _
-           "エラー内容: " & Err.Description, vbCritical
-    GoTo CleanUp_Xlsx
 End Sub
 
 
@@ -427,14 +403,13 @@ Private Function GetCompositeKey(ByVal ws As Worksheet, ByVal rowNum As Long, By
     GetCompositeKey = key
 End Function
 
-Public Sub CreateDiffReport()
+Private Sub CreateDiffReport()
 
-    ' --- 書式設定用の定数 ---
-    Const ADDED_COLOR As Long = 5296274      ' 追加行の背景色 (薄い緑)
-    Const DELETED_COLOR As Long = 12632256    ' 削除行の背景色 (薄い赤)
-    Const MODIFIED_ROW_COLOR As Long = 65535  ' 変更行の「状態」セルの背景色 (黄色)
-    Const MODIFIED_CELL_COLOR As Long = 49407 ' 変更があったセルの背景色 (薄いオレンジ)
-    Const DIFF_CELL_FONT_COLOR As Long = vbRed ' 変更後の値のフォント色 (赤)
+    Const ADDED_COLOR As Long = 5296274
+    Const DELETED_COLOR As Long = 12632256
+    Const MODIFIED_ROW_COLOR As Long = 65535
+    Const MODIFIED_CELL_COLOR As Long = 49407
+    Const DIFF_CELL_FONT_COLOR As Long = vbRed
     
     Dim tsvWs As Worksheet, xlsxWs As Worksheet, diffWs As Worksheet
     Dim tsvDict As Object
@@ -445,9 +420,7 @@ Public Sub CreateDiffReport()
     Dim isModified As Boolean, keyIsDefined As Boolean
     Dim processedCount As Long
     
-    On Error GoTo ErrorHandler_Diff
     processedCount = 0
-    Application.ScreenUpdating = False
     
     For Each xlsxWs In ThisWorkbook.Worksheets
         If xlsxWs.name Like "*_xlsx" Then
@@ -457,7 +430,7 @@ Public Sub CreateDiffReport()
             Set tsvWs = Nothing
             On Error Resume Next
             Set tsvWs = ThisWorkbook.Worksheets(tsvSheetName)
-            On Error GoTo ErrorHandler_Diff
+            On Error GoTo 0 ' エラーハンドリングを一旦解除
             
             If Not tsvWs Is Nothing Then
                 keyIsDefined = True
@@ -473,17 +446,15 @@ Public Sub CreateDiffReport()
                     processedCount = processedCount + 1
                     
                     diffSheetName = tsvSheetName & "_diff"
-                    Application.DisplayAlerts = False
+                    
                     On Error Resume Next
                     ThisWorkbook.Worksheets(diffSheetName).Delete
-                    On Error GoTo ErrorHandler_Diff
-                    Application.DisplayAlerts = True
+                    On Error GoTo 0 ' エラーハンドリングを一旦解除
                     
                     Set diffWs = ThisWorkbook.Worksheets.Add(After:=xlsxWs)
                     diffWs.name = diffSheetName
-                    diffWs.Cells.NumberFormat = "@" ' 日付自動変換を防止
+                    diffWs.Cells.NumberFormat = "@"
                     
-                    ' ヘッダーをXLSXシートからコピー
                     lastColXlsx = xlsxWs.Cells(1, xlsxWs.Columns.Count).End(xlToLeft).Column
                     diffWs.Cells(1, 1).Value = "状態"
                     diffWs.Cells(1, 2).Resize(1, lastColXlsx).Value = xlsxWs.Range("A1").Resize(1, lastColXlsx).Value
@@ -577,20 +548,9 @@ Public Sub CreateDiffReport()
         End If
     Next xlsxWs
     
-    Application.ScreenUpdating = True
-    
-    If processedCount > 0 Then
-        MsgBox processedCount & "組の差分レポートを作成しました。", vbInformation
-    Else
+    If processedCount = 0 Then
         MsgBox "比較対象となるシートの組み合わせが見つかりませんでした。" & vbCrLf & _
                "（例: 「Mst_A」と「Mst_A_xlsx」のペアが必要です）", vbExclamation
     End If
     
-    Exit Sub
-
-ErrorHandler_Diff:
-    Application.ScreenUpdating = True
-    MsgBox "差分比較処理中にエラーが発生しました。" & vbCrLf & vbCrLf & _
-           "エラー番号: " & Err.Number & vbCrLf & _
-           "エラー内容: " & Err.Description, vbCritical
 End Sub
