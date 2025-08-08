@@ -1,5 +1,186 @@
 '================================================================================
-' ■■■ メイン処理② (XLSXファイル結合) ★★★ 個別設定対応版 ★★★
+' 概要：指定したフォルダ内のTSV/XLSXファイルを、ファイル名に含まれるマスタ名ごとに
+'       新しいシートへ結合し、両者の差分をレポートするマクロ (最終修正版)
+'================================================================================
+
+Option Explicit
+
+' ■■■ ヘルパー関数①: シート名を安全な文字列にする ■■■
+Private Function SanitizeSheetName(ByVal name As String) As String
+    Dim invalidChars As Variant
+    invalidChars = Array("/", "\", "?", "*", "[", "]")
+    Dim i As Long
+    For i = 0 To UBound(invalidChars)
+        name = Replace(name, invalidChars(i), "")
+    Next i
+
+    If Len(name) > 31 Then
+        name = Left(name, 31)
+    End If
+    SanitizeSheetName = name
+End Function
+
+' ■■■ ヘルパー関数②: TSVのフィールドから不要な""を除去する ■■■
+Private Function CleanTsvField(ByVal field As String) As String
+    Dim temp As String
+    temp = field
+
+    ' フィールドがダブルクォーテーションで囲まれているかチェック
+    If Len(temp) >= 2 And Left(temp, 1) = """" And Right(temp, 1) = """" Then
+        ' 両端の " を削除
+        temp = Mid(temp, 2, Len(temp) - 2)
+        ' 内部でエスケープされている "" を " (一つ) に置換
+        temp = Replace(temp, """""", """")
+    End If
+    CleanTsvField = temp
+End Function
+
+
+' ■■■ メイン処理① (TSVファイル結合) ■■■
+Public Sub CombineTsvFilesByMaster()
+
+    ' ★★★ TSVファイルのヘッダー設定 (TSV自体にヘッダーが無い場合) ★★★
+    Const HEADER_ROW_TEXT As String = "ファイル名,ヘッダは無し,,,"
+    
+    ' --- 初期設定 ---
+    Dim fso As Object, fileGroups As Object, targetFolder As Object, file As Object, stream As Object
+    Dim folderPath As String, textLine As String, sheetName As String, filePath As String, sourceName As String
+    Dim masterName As Variant
+    Dim lineParts() As String, writeData() As String
+    Dim ws As Worksheet
+    Dim lineCounter As Long, i As Long, j As Long
+
+    ' --- ユーザーにフォルダを選択させる ---
+    With Application.FileDialog(4) ' msoFileDialogFolderPicker
+        .Title = "TSVファイルが保存されているフォルダを選択してください"
+        If .Show = False Then Exit Sub
+        folderPath = .SelectedItems(1)
+    End With
+    
+    ' --- オブジェクトを準備 ---
+    On Error GoTo ErrorHandler_Tsv
+    Set fso = CreateObject("Scripting.FileSystemObject")
+    Set fileGroups = CreateObject("Scripting.Dictionary")
+    Set targetFolder = fso.GetFolder(folderPath)
+    
+    ' --- ステップ1: ファイルをマスタ名でグループ化 & A列用の名前を抽出 ---
+    For Each file In targetFolder.Files
+        If LCase(file.name) Like "移行用シート_*.tsv" Then
+            Dim baseName As String
+            baseName = fso.GetBaseName(file.name)
+
+            Dim firstUnderscorePos As Long, secondUnderscorePos As Long
+            firstUnderscorePos = InStr(1, baseName, "_")
+            If firstUnderscorePos > 0 Then
+                secondUnderscorePos = InStr(firstUnderscorePos + 1, baseName, "_")
+                If secondUnderscorePos > 0 Then
+                    sourceName = Mid(baseName, secondUnderscorePos + 1)
+                    masterName = Mid(baseName, firstUnderscorePos + 1, secondUnderscorePos - firstUnderscorePos - 1)
+
+                    If Not fileGroups.Exists(masterName) Then
+                        fileGroups.Add masterName, New Collection
+                    End If
+                    fileGroups(masterName).Add Array(file.Path, sourceName)
+                End If
+            End If
+        End If
+    Next file
+
+    If fileGroups.Count = 0 Then
+        MsgBox "対象となるTSVファイルが見つかりませんでした。", vbInformation
+        GoTo CleanUp_Tsv
+    End If
+    
+    Application.ScreenUpdating = False
+    
+    ' --- ステップ2: グループごとにシートを作成し、データを結合して書き込む ---
+    For Each masterName In fileGroups.Keys
+        sheetName = SanitizeSheetName(CStr(masterName))
+    
+        On Error Resume Next
+        Set ws = Nothing
+        Set ws = ThisWorkbook.Worksheets(sheetName)
+        On Error GoTo ErrorHandler_Tsv
+    
+        If ws Is Nothing Then
+            Set ws = ThisWorkbook.Worksheets.Add(After:=ThisWorkbook.Worksheets(ThisWorkbook.Worksheets.Count))
+            ws.name = sheetName
+            ws.Cells.NumberFormat = "@"
+        Else
+            ws.Cells.ClearContents
+            ws.Cells.NumberFormat = "@"
+        End If
+
+        ' 固定ヘッダーを1行目に書き込む
+        Dim headers() As String
+        headers = Split(HEADER_ROW_TEXT, ",")
+        ws.Cells(1, 1).Resize(1, UBound(headers) + 1).Value = headers
+
+        lineCounter = 2 ' データは2行目から書き始める
+
+        Dim fileList As Collection
+        Set fileList = fileGroups(masterName)
+
+        Set stream = CreateObject("ADODB.Stream")
+        stream.Charset = "UTF-8"
+    
+        For i = 1 To fileList.Count
+            Dim fileInfo As Variant
+            fileInfo = fileList.Item(i)
+            filePath = fileInfo(0)
+            sourceName = fileInfo(1)
+
+            stream.Open
+            stream.LoadFromFile filePath
+
+            Do While Not stream.EOS
+                textLine = stream.ReadText(-2) ' 1行読む
+
+                If Trim(textLine) <> "" Then ' 空行はスキップ
+                    lineParts = Split(textLine, vbTab)
+                    ReDim writeData(0 To UBound(lineParts) + 1)
+                    writeData(0) = sourceName
+                    For j = 0 To UBound(lineParts)
+                        writeData(j + 1) = CleanTsvField(lineParts(j))
+                    Next j
+                    ws.Cells(lineCounter, 1).Resize(1, UBound(writeData) + 1).Value = writeData
+                    lineCounter = lineCounter + 1
+                End If
+            Loop
+
+            stream.Close
+        Next i
+
+        ws.Columns.AutoFit
+    Next masterName
+    
+    Application.ScreenUpdating = True
+    MsgBox "TSVファイルの結合処理が完了しました。", vbInformation
+
+CleanUp_Tsv:
+    On Error Resume Next
+    Set ws = Nothing
+    Set fileList = Nothing
+    Set file = Nothing
+    Set targetFolder = Nothing
+    Set fileGroups = Nothing
+    Set fso = Nothing
+    If Not stream Is Nothing Then
+        If stream.State = 1 Then stream.Close
+        Set stream = Nothing
+    End If
+    Application.ScreenUpdating = True
+    Exit Sub
+    
+ErrorHandler_Tsv:
+    MsgBox "TSVファイルの処理中にエラーが発生しました。" & vbCrLf & vbCrLf & _
+           "エラー番号: " & Err.Number & vbCrLf & _
+           "エラー内容: " & Err.Description, vbCritical
+    GoTo CleanUp_Tsv
+End Sub
+
+'================================================================================
+' ■■■ メイン処理② (XLSXファイル結合) ■■■
 '================================================================================
 Public Sub CombineXlsxFilesByMaster()
 
@@ -228,4 +409,188 @@ ErrorHandler_Xlsx:
            "エラー番号: " & Err.Number & vbCrLf & _
            "エラー内容: " & Err.Description, vbCritical
     GoTo CleanUp_Xlsx
+End Sub
+
+
+'================================================================================
+' ■■■ メイン処理③ (差分レポート作成) ■■■
+'================================================================================
+
+Private Function GetCompositeKey(ByVal ws As Worksheet, ByVal rowNum As Long, ByVal keyCols As Variant) As String
+    Dim key As String, i As Long
+    key = ""
+    On Error Resume Next
+    For i = 0 To UBound(keyCols)
+        key = key & Trim(ws.Cells(rowNum, keyCols(i)).Value) & Chr(0)
+    Next i
+    On Error GoTo 0
+    GetCompositeKey = key
+End Function
+
+Public Sub CreateDiffReport()
+
+    ' --- 書式設定用の定数 ---
+    Const ADDED_COLOR As Long = 5296274      ' 追加行の背景色 (薄い緑)
+    Const DELETED_COLOR As Long = 12632256    ' 削除行の背景色 (薄い赤)
+    Const MODIFIED_ROW_COLOR As Long = 65535  ' 変更行の「状態」セルの背景色 (黄色)
+    Const MODIFIED_CELL_COLOR As Long = 49407 ' 変更があったセルの背景色 (薄いオレンジ)
+    Const DIFF_CELL_FONT_COLOR As Long = vbRed ' 変更後の値のフォント色 (赤)
+    
+    Dim tsvWs As Worksheet, xlsxWs As Worksheet, diffWs As Worksheet
+    Dim tsvDict As Object
+    Dim tsvSheetName As String, masterName As String, xlsxKey As String, diffSheetName As String
+    Dim keyCols As Variant, key As Variant
+    Dim lastRowTsv As Long, lastRowXlsx As Long, lastColTsv As Long, lastColXlsx As Long, maxCol As Long
+    Dim r As Long, c As Long, tsvRowNum As Long, diffRow As Long
+    Dim isModified As Boolean, keyIsDefined As Boolean
+    Dim processedCount As Long
+    
+    On Error GoTo ErrorHandler_Diff
+    processedCount = 0
+    Application.ScreenUpdating = False
+    
+    For Each xlsxWs In ThisWorkbook.Worksheets
+        If xlsxWs.name Like "*_xlsx" Then
+            tsvSheetName = Replace(xlsxWs.name, "_xlsx", "")
+            masterName = tsvSheetName
+            
+            Set tsvWs = Nothing
+            On Error Resume Next
+            Set tsvWs = ThisWorkbook.Worksheets(tsvSheetName)
+            On Error GoTo ErrorHandler_Diff
+            
+            If Not tsvWs Is Nothing Then
+                keyIsDefined = True
+                Select Case masterName
+                    Case "事業体マスタ":   keyCols = Array(1, 4)
+                    Case "スキームマスタ": keyCols = Array(1, 3, 7)
+                    Case "フロアマスタ":   keyCols = Array(1, 3, 7, 9)
+                    Case "区画マスタ":     keyCols = Array(1, 3, 7, 9, 11)
+                    Case Else:           keyIsDefined = False
+                End Select
+                
+                If keyIsDefined Then
+                    processedCount = processedCount + 1
+                    
+                    diffSheetName = tsvSheetName & "_diff"
+                    Application.DisplayAlerts = False
+                    On Error Resume Next
+                    ThisWorkbook.Worksheets(diffSheetName).Delete
+                    On Error GoTo ErrorHandler_Diff
+                    Application.DisplayAlerts = True
+                    
+                    Set diffWs = ThisWorkbook.Worksheets.Add(After:=xlsxWs)
+                    diffWs.name = diffSheetName
+                    diffWs.Cells.NumberFormat = "@" ' 日付自動変換を防止
+                    
+                    ' ヘッダーをXLSXシートからコピー
+                    lastColXlsx = xlsxWs.Cells(1, xlsxWs.Columns.Count).End(xlToLeft).Column
+                    diffWs.Cells(1, 1).Value = "状態"
+                    diffWs.Cells(1, 2).Resize(1, lastColXlsx).Value = xlsxWs.Range("A1").Resize(1, lastColXlsx).Value
+                    diffWs.Rows(1).Font.Bold = True
+
+                    diffRow = 2
+                    
+                    Set tsvDict = CreateObject("Scripting.Dictionary")
+                    lastRowTsv = tsvWs.Cells(tsvWs.Rows.Count, 1).End(xlUp).Row
+                    If lastRowTsv >= 2 Then
+                        For r = 2 To lastRowTsv
+                            key = GetCompositeKey(tsvWs, r, keyCols)
+                            If Not tsvDict.Exists(key) Then tsvDict.Add key, r
+                        Next r
+                    End If
+                    
+                    lastRowXlsx = xlsxWs.Cells(xlsxWs.Rows.Count, 1).End(xlUp).Row
+                    If lastRowXlsx >= 2 Then
+                        For r = 2 To lastRowXlsx
+                            xlsxKey = GetCompositeKey(xlsxWs, r, keyCols)
+                            
+                            If tsvDict.Exists(xlsxKey) Then
+                                tsvRowNum = tsvDict(xlsxKey)
+                                isModified = False
+                                
+                                lastColTsv = tsvWs.Cells(tsvRowNum, tsvWs.Columns.Count).End(xlToLeft).Column
+                                lastColXlsx = xlsxWs.Cells(r, xlsxWs.Columns.Count).End(xlToLeft).Column
+                                maxCol = Application.WorksheetFunction.Max(lastColTsv, lastColXlsx)
+                                
+                                diffWs.Cells(diffRow, 2).Resize(1, maxCol).Value = xlsxWs.Cells(r, 1).Resize(1, maxCol).Value
+                                
+                                For c = 1 To maxCol
+                                    Dim beforeVal As String, afterVal As String
+                                    beforeVal = CStr(tsvWs.Cells(tsvRowNum, c).Value)
+                                    afterVal = CStr(xlsxWs.Cells(r, c).Value)
+
+                                    If beforeVal <> afterVal Then
+                                        isModified = True
+                                        With diffWs.Cells(diffRow, c + 1)
+                                            .Interior.Color = MODIFIED_CELL_COLOR
+                                            .Value = beforeVal & " -> " & afterVal
+                                            .Font.Color = vbBlack
+                                            .Font.Bold = False
+
+                                            Dim arrowPos As Long
+                                            arrowPos = InStr(1, .Value, " -> ")
+
+                                            If arrowPos > 0 Then
+                                                With .Characters(Start:=arrowPos + 4, Length:=Len(afterVal)).Font
+                                                    .Color = DIFF_CELL_FONT_COLOR
+                                                    .Bold = True
+                                                End With
+                                            End If
+                                        End With
+                                    End If
+                                Next c
+                                
+                                If isModified Then
+                                    diffWs.Cells(diffRow, 1).Value = "変更"
+                                    diffWs.Cells(diffRow, 1).Interior.Color = MODIFIED_ROW_COLOR
+                                Else
+                                    diffWs.Cells(diffRow, 1).Value = "変更なし"
+                                End If
+                                
+                                tsvDict.Remove xlsxKey
+                                diffRow = diffRow + 1
+                            Else
+                                lastColXlsx = xlsxWs.Cells(r, xlsxWs.Columns.Count).End(xlToLeft).Column
+                                diffWs.Cells(diffRow, 2).Resize(1, lastColXlsx).Value = xlsxWs.Cells(r, 1).Resize(1, lastColXlsx).Value
+                                diffWs.Cells(diffRow, 1).Value = "追加"
+                                diffWs.Rows(diffRow).Interior.Color = ADDED_COLOR
+                                diffRow = diffRow + 1
+                            End If
+                        Next r
+                    End If
+                    
+                    If tsvDict.Count > 0 Then
+                        For Each key In tsvDict.Keys
+                            tsvRowNum = tsvDict(key)
+                            lastColTsv = tsvWs.Cells(tsvRowNum, tsvWs.Columns.Count).End(xlToLeft).Column
+                            diffWs.Cells(diffRow, 2).Resize(1, lastColTsv).Value = tsvWs.Cells(tsvRowNum, 1).Resize(1, lastColTsv).Value
+                            diffWs.Cells(diffRow, 1).Value = "削除"
+                            diffWs.Rows(diffRow).Interior.Color = DELETED_COLOR
+                            diffRow = diffRow + 1
+                        Next key
+                    End If
+                    
+                    diffWs.Columns.AutoFit
+                End If
+            End If
+        End If
+    Next xlsxWs
+    
+    Application.ScreenUpdating = True
+    
+    If processedCount > 0 Then
+        MsgBox processedCount & "組の差分レポートを作成しました。", vbInformation
+    Else
+        MsgBox "比較対象となるシートの組み合わせが見つかりませんでした。" & vbCrLf & _
+               "（例: 「Mst_A」と「Mst_A_xlsx」のペアが必要です）", vbExclamation
+    End If
+    
+    Exit Sub
+
+ErrorHandler_Diff:
+    Application.ScreenUpdating = True
+    MsgBox "差分比較処理中にエラーが発生しました。" & vbCrLf & vbCrLf & _
+           "エラー番号: " & Err.Number & vbCrLf & _
+           "エラー内容: " & Err.Description, vbCritical
 End Sub
