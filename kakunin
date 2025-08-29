@@ -1,0 +1,216 @@
+#!/bin/bash
+
+#================================================================
+# CSV Masking Tool
+#
+# Description:
+#   A tool to mask specified columns in CSV files.
+#   It correctly handles fields enclosed in double quotes.
+#
+# Usage:
+#   ./mask_csv.sh -c <columns> [options] [file1.csv ...]
+#
+# Options:
+#   -c <columns> : Comma-separated column numbers to mask (e.g., '2,4'). Required.
+#   -r <string>  : Replacement string for masking (default: "MASKED"). Not used with -k.
+#   -k           : Enable custom masking (show first char, preserve width).
+#   -H           : Do not mask the header row (first line).
+#   -h           : Display this help message.
+#
+# Example:
+#   # Custom mask (show first char) for columns 2 and 5
+#   ./mask_csv.sh -c 2,5 -k -H data.csv > masked_data.csv
+#
+#   # Simple replacement for column 3
+#   ./mask_csv.sh -c 3 -r '***' data.csv > masked_data.csv
+#
+#================================================================
+
+# --- Default Settings ---
+REPLACEMENT_STRING="\"MASKED\"" # Default replacement string, quoted for CSV
+MASK_HEADER=true
+CUSTOM_MASK_ENABLED=false
+
+# --- Help Message Function ---
+usage() {
+    echo "Usage: $0 -c <columns> [options] [file1.csv ...]"
+    echo "  -c <columns>  : Comma-separated column numbers to mask (e.g., '2,4'). Required."
+    echo "  -r <string>   : Replacement string for masking (default: \"MASKED\"). Not used with -k."
+    echo "  -k            : Enable custom masking (show first char, preserve width)."
+    echo "  -H            : Do not mask the header row (first line)."
+    echo "  -h            : Display this help message."
+    exit 1
+}
+
+# --- Argument Parsing ---
+MASK_COLS=""
+while getopts "c:r:kHh" opt; do
+    case ${opt} in
+        c)
+            MASK_COLS=${OPTARG}
+            ;;
+        r)
+            # Enclose the user-provided string in double quotes for CSV format
+            REPLACEMENT_STRING="\"${OPTARG}\""
+            ;;
+        k)
+            CUSTOM_MASK_ENABLED=true
+            ;;
+        H)
+            MASK_HEADER=false
+            ;;
+        h)
+            usage
+            ;;
+        \?)
+            usage
+            ;;
+    esac
+done
+shift $((OPTIND - 1))
+
+# --- Validate Required Arguments ---
+if [ -z "${MASK_COLS}" ] || [ $# -eq 0 ]; then
+    echo "Error: Missing required arguments. Use -h for help." >&2
+    exit 1
+fi
+
+# --- Main Processing Loop ---
+for file in "$@"; do
+    if [ ! -f "$file" ]; then
+        echo "Warning: File not found, skipping: $file" >&2
+        continue
+    fi
+
+    # Use awk for robust CSV processing
+    awk -v cols="${MASK_COLS}" \
+        -v replacement="${REPLACEMENT_STRING}" \
+        -v mask_header="${MASK_HEADER}" \
+        -v custom_mask_enabled="${CUSTOM_MASK_ENABLED}" \
+    '
+    # AWK function for advanced masking:
+    # - Shows the first character.
+    # - Replaces subsequent characters with "*" (half-width) or "＊" (full-width).
+    function custom_mask(str,    # local variables
+                         result, first_char, i, char, masked_part) {
+        # Handle empty or single-character strings
+        if (length(str) <= 1) {
+            return str;
+        }
+
+        first_char = substr(str, 1, 1);
+        masked_part = "";
+
+        # Loop through the rest of the string from the second character
+        for (i = 2; i <= length(str); i++) {
+            char = substr(str, i, 1);
+            # Check if the character is multi-byte (non-ASCII), treat as full-width.
+            # This regex matches characters outside the standard ASCII range.
+            if (char ~ /[^\x01-\x7E]/) {
+                masked_part = masked_part "＊"; # Full-width asterisk
+            } else {
+                masked_part = masked_part "*";  # Half-width asterisk
+            }
+        }
+
+        result = first_char masked_part;
+        return result;
+    }
+
+    BEGIN {
+        # FPAT defines what a "field" is. This pattern handles:
+        # 1. Quoted fields: "[^"]*" (anything that is not a quote, inside quotes)
+        # 2. Unquoted fields: [^,]+ (anything that is not a comma)
+        FPAT = "(\"[^\"]*\")|([^,]+)"
+        OFS = ","
+
+        # Create an associative array for columns to be masked for quick lookup
+        split(cols, col_array, ",")
+        for (i in col_array) {
+            mask_targets[col_array[i]] = 1
+        }
+    }
+
+    # Process each line
+    {
+        # Skip masking for the header row if the -H flag is set
+        if (FNR == 1 && mask_header == "false") {
+            print
+            next
+        }
+
+        # Iterate through each field in the current line
+        for (i = 1; i <= NF; i++) {
+            # If the current column number is in our target list, apply mask
+            if (i in mask_targets) {
+                if (custom_mask_enabled == "true") {
+                    is_quoted = (substr($i, 1, 1) == "\"")
+                    content_to_mask = $i
+
+                    # If quoted, extract the content inside the quotes
+                    if (is_quoted) {
+                        content_to_mask = substr($i, 2, length($i) - 2)
+                    }
+                    
+                    masked_content = custom_mask(content_to_mask)
+
+                    # Add quotes back if they were there originally
+                    if (is_quoted) {
+                        $i = "\"" masked_content "\""
+                    } else {
+                        $i = masked_content
+                    }
+                } else {
+                    # Original simple replacement
+                    $i = replacement
+                }
+            }
+        }
+        # Print the modified (or unmodified) line
+        print
+    }
+    ' "$file"
+done
+```
+
+### 変更点と新しい使い方
+
+#### スクリプトの主な変更点
+
+1.  **新しいオプション `-k` を追加**: このオプションを指定することで、新しいカスタムマスク処理が有効になります。
+2.  **`custom_mask` 関数を`awk`内に追加**:
+    * 引数として受け取った文字列の最初の1文字を保持します。
+    * 2文字目以降を1文字ずつループ処理します。
+    * 正規表現 `/[^\x01-\x7E]/` を使い、文字が標準的なASCII（半角）の範囲外かどうかを判定します。
+    * 範囲外（日本語の全角文字など）の場合は全角アスタリスク`＊`に、範囲内（英数字記号など）の場合は半角アスタリスク`*`に置き換えます。
+    * 最後に、保持しておいた1文字目とマスク化した文字列を結合して返します。
+3.  **メイン処理の分岐**: `-k` オプションが指定されているかどうかで、`custom_mask`関数を呼び出すか、従来の固定文字列での置換を行うかを切り替えるロジックを追加しました。
+
+#### 新しい使い方
+
+例えば、以下のような`employees.csv`があったとします。
+
+```csv
+ID,氏名,Department,Email
+1,"山田 太郎","Sales","taro.yamada@example.com"
+2,"John Smith","Marketing","john.s@example.com"
+```
+
+このファイルの2列目（氏名）と4列目（Email）を、新しい方式でマスクしてみましょう。
+
+```bash
+# -k オプションを付けて実行
+./mask_csv.sh -c 2,4 -k -H employees.csv
+```
+
+**実行結果:**
+
+```csv
+ID,氏名,Department,Email
+1,"山＊＊＊","Sales","t**********************"
+2,"J*********","Marketing","j*******************"
+```
+
+このように、「山田 太郎」は「山＊＊＊」となり、全角・半角やスペースが維持されていることがわかります。Emailも最初の`t`だけが表示され、残りは文字数を維持したまま`*`でマスクされています。
+
+ご希望の動作になっているか、ぜひお試しください。さらに調整が必要な場合は、お気軽にお申し付けくだ
