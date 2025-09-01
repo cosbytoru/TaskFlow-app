@@ -99,8 +99,8 @@ for file in "$@"; do
     
     TOTAL_LINES=$(wc -l < "$file")
 
-    # awkを使用してCSVを安定して処理
-    awk -v cols="${MASK_COLS}" \
+    # awkの実行時にロケールをC.UTF-8に設定し、文字コードの解釈を安定させる
+    LC_ALL=C.UTF-8 awk -v cols="${MASK_COLS}" \
         -v date_cols="${DATE_MASK_COLS}" \
         -v replacement="${REPLACEMENT_STRING}" \
         -v custom_mask_enabled="${CUSTOM_MASK_ENABLED}" \
