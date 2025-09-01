@@ -13,17 +13,17 @@
 # オプション:
 #   -c <列番号> : マスクするカラム番号をカンマ区切りで指定 (例: '2,4')。
 #   -d <列番号> : '19700101'でマスクする日付カラムをカンマ区切りで指定。
+#   -K <列番号> : 【半角カナ用】全体を'*'でマスクするカラムをカンマ区切りで指定。
 #   -r <文字列> : -cで指定した列の置換文字列 (デフォルト: "MASKED")。-k使用時は無効。
-#   -k           : -cで指定した列にカスタムマスク処理(先頭1文字表示、文字種/幅維持)を有効化。
+#   -k           : -cで指定した列にカスタムマスク処理(先頭1文字表示)を有効化。
 #   -H <行数>   : マスク処理から除外するヘッダーの行数 (デフォルト: 0)。
 #   -F <行数>   : マスク処理から除外するフッターの行数 (デフォルト: 0)。
 #   -E <文字コード> : 入力ファイルの文字コードを指定 (例: SHIFT_JIS)。
-#                     半角カナ等がマスクされない場合にお試しください。
 #   -h           : このヘルプメッセージを表示する。
 #
 # 使用例:
-#   # Shift_JISのファイルを指定し、2列目をカスタムルールでマスク
-#   ./mask_csv.sh -E SHIFT_JIS -c 2 -k data.csv > masked_data.csv
+#   # 2列目(半角カナ)を全体マスクし、4列目を日付マスクする
+#   ./mask_csv.sh -K 2 -d 4 data.csv > masked_data.csv
 #
 #================================================================
 
@@ -32,6 +32,7 @@ REPLACEMENT_STRING="\"MASKED\"" # デフォルトの置換文字列 (CSV形式�
 CUSTOM_MASK_ENABLED=false
 MASK_COLS=""
 DATE_MASK_COLS=""
+HANKAKU_KANA_COLS=""
 HEADER_LINES=0
 FOOTER_LINES=0
 ENCODING=""
@@ -41,24 +42,27 @@ usage() {
     echo "使用方法: $0 [options] [file1.csv ...]"
     echo "  -c <列番号> : マスクするカラム番号をカンマ区切りで指定 (例: '2,4')。"
     echo "  -d <列番号> : '19700101'でマスクする日付カラムをカンマ区切りで指定。"
+    echo "  -K <列番号> : 【半角カナ用】全体を'*'でマスクするカラムをカンマ区切りで指定。"
     echo "  -r <文字列> : -cで指定した列の置換文字列 (デフォルト: \"MASKED\")。-k使用時は無効。"
-    echo "  -k           : -cで指定した列にカスタムマスク処理(先頭1文字表示、文字種/幅維持)を有効化。"
+    echo "  -k           : -cで指定した列にカスタムマスク処理(先頭1文字表示)を有効化。"
     echo "  -H <行数>   : マスク処理から除外するヘッダーの行数 (デフォルト: 0)。"
     echo "  -F <行数>   : マスク処理から除外するフッターの行数 (デフォルト: 0)。"
     echo "  -E <文字コード> : 入力ファイルの文字コードを指定 (例: SHIFT_JIS)。"
-    echo "                     半角カナ等がマスクされない場合にお試しください。"
     echo "  -h           : このヘルプメッセージを表示する。"
     exit 1
 }
 
 # --- オプション解析 ---
-while getopts "c:d:r:kH:F:E:h" opt; do
+while getopts "c:d:K:r:kH:F:E:h" opt; do
     case ${opt} in
         c)
             MASK_COLS=${OPTARG}
             ;;
         d)
             DATE_MASK_COLS=${OPTARG}
+            ;;
+        K)
+            HANKAKU_KANA_COLS=${OPTARG}
             ;;
         r)
             # ユーザー指定の文字列をCSV形式のためダブルクォートで囲む
@@ -87,8 +91,8 @@ done
 shift $((OPTIND - 1))
 
 # --- 必須引数の検証 ---
-if [ -z "${MASK_COLS}" ] && [ -z "${DATE_MASK_COLS}" ]; then
-    echo "エラー: -c または -d のいずれかを指定する必要があります。-hでヘルプを表示します。" >&2
+if [ -z "${MASK_COLS}" ] && [ -z "${DATE_MASK_COLS}" ] && [ -z "${HANKAKU_KANA_COLS}" ]; then
+    echo "エラー: -c, -d, -K のいずれかを指定する必要があります。-hでヘルプを表示します。" >&2
     exit 1
 fi
 
@@ -99,20 +103,9 @@ fi
 
 # --- awkスクリプトをヒアドキュメントで変数に格納 ---
 read -r -d '' AWK_SCRIPT << 'EOF'
-# 高度なマスク処理を行うAWK関数
+# 高度なマスク処理を行うAWK関数 (半角カナ判定は削除)
 function custom_mask(str,    # local variables
-                     result, first_char, i, char, masked_part, masked_str) {
-
-    # 【対策】まず、扱いにくい半角カタカナが文字列に含まれているかを確認します。
-    # 含まれている場合は、より安全な全体置換方式でマスクします。
-    if (str ~ /[ｦｧｨｩｪｫｬｭｮｯｰｱｲｳｴｵｶｷｸｹｺｻｼｽｾｿﾀﾁﾂﾃﾄﾅﾆﾇﾈﾉﾊﾋﾌﾍﾎﾏﾐﾑﾒﾓﾔﾕﾖﾗﾘﾙﾚﾛﾜﾝﾞﾟ]/) {
-        masked_str = str;
-        # 全ての文字を半角アスタリスクに置換します。
-        gsub(/./, "*", masked_str);
-        return masked_str;
-    }
-
-    # 半角カタカナが含まれていない場合は、これまで通りの処理を続けます。
+                     result, first_char, i, char, masked_part) {
     if (length(str) <= 1) { return str; }
     first_char = substr(str, 1, 1);
     masked_part = "";
@@ -147,6 +140,10 @@ BEGIN {
         split(date_cols, date_col_array, ",")
         for (i in date_col_array) { date_mask_targets[date_col_array[i]] = 1 }
     }
+    if (hankaku_cols != "") {
+        split(hankaku_cols, hankaku_col_array, ",")
+        for (i in hankaku_col_array) { hankaku_kana_targets[hankaku_col_array[i]] = 1 }
+    }
 }
 
 # 各行を処理
@@ -167,10 +164,23 @@ BEGIN {
             }
         }
     }
+    
+    # 次に半角カナ列のマスク処理
+    for (col_num in hankaku_kana_targets) {
+        if (col_num in date_mask_targets) { continue } # 日付マスク済みはスキップ
+        if (col_num > 0 && col_num <= NF) {
+            is_quoted = (substr($col_num, 1, 1) == "\"")
+            content = is_quoted ? substr($col_num, 2, length($col_num) - 2) : $col_num
+            if (length(content) > 0) {
+                gsub(/./, "*", content) # 全ての文字を'*'に置換
+                $col_num = is_quoted ? "\"" content "\"" : content
+            }
+        }
+    }
 
-    # 次に通常のマスク処理
+    # 最後に通常のマスク処理
     for (col_num in mask_targets) {
-        if (col_num in date_mask_targets) { continue }
+        if (col_num in date_mask_targets || col_num in hankaku_kana_targets) { continue } # 処理済みはスキップ
         if (col_num > 0 && col_num <= NF) {
             is_quoted = (substr($col_num, 1, 1) == "\"")
             content = is_quoted ? substr($col_num, 2, length($col_num) - 2) : $col_num
@@ -206,6 +216,7 @@ for file in "$@"; do
         awk
         -v "cols=${MASK_COLS}"
         -v "date_cols=${DATE_MASK_COLS}"
+        -v "hankaku_cols=${HANKAKU_KANA_COLS}"
         -v "replacement=${REPLACEMENT_STRING}"
         -v "custom_mask_enabled=${CUSTOM_MASK_ENABLED}"
         -v "header_lines=${HEADER_LINES}"
@@ -226,4 +237,3 @@ for file in "$@"; do
         "${AWK_COMMAND[@]}" "$file"
     fi
 done
-
