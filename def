@@ -1,59 +1,55 @@
 #!/bin/bash
 
 #================================================================
-# CSVフィルタリングツール
+# CSVフィルタリングツール (TOP/ENDレコード対応版)
 #
 # 説明:
-#   指定された列の値が、指定された文字列のいずれかと一致する行を抽出します。
-#   ヘッダー行とフッター行をスキップするオプションも備えています。
+#   指定された列の値が、指定された文字列のいずれかと一致するデータ行を抽出します。
+#   ファイルの先頭にあるTOPレコードと末尾にあるENDレコードを自動的に処理し、
+#   抽出後のデータに合わせて1列目のカウンタを再附番し、ENDレコードの
+#   総レコード数を更新します。
+#
+# 入力CSVの前提フォーマット:
+#   "0","TOP",...
+#   "1","DATA",...
+#   ...
+#   "N","END","N+1"
 #
 # 使用方法:
-#   ./filter_csv.sh -c <列番号> -s <文字列> [options] [file1.csv ...]
+#   ./filter_csv.sh -c <列番号> -s <文字列> [file1.csv ...]
 #
 # オプション:
 #   -c <列番号> : フィルタリング対象のカラム番号。必須。
 #   -s <文字列> : 抽出する文字列をカンマ区切りで指定 (例: "G111,G3333")。必須。
-#   -H <行数>   : スキップするヘッダーの行数 (デフォルト: 0)。
-#   -F <行数>   : スキップするフッターの行数 (デフォルト: 0)。
-#   -h           : このヘルプメッセージを表示する。
+#   -h          : このヘルプメッセージを表示する。
 #
 # 使用例:
-#   # 3列目が "A01" または "B02" の行を、ヘッダー1行とフッター2行を除いて抽出
-#   ./filter_csv.sh -c 3 -s "A01,B02" -H 1 -F 2 data.csv
+#   # 3列目が "A01" または "B02" の行を抽出
+#   ./filter_csv.sh -c 3 -s "A01,B02" data.csv
 #
 #================================================================
 
 # --- デフォルト設定 ---
-HEADER_LINES=0
-FOOTER_LINES=0
 COLUMN=""
 MATCH_STRINGS=""
 
 # --- ヘルプメッセージ表示関数 ---
 usage() {
-    echo "使用方法: $0 -c <列番号> -s <文字列> [options] [file1.csv ...]"
+    echo "使用方法: $0 -c <列番号> -s <文字列> [file1.csv ...]"
     echo "  -c <列番号> : フィルタリング対象のカラム番号。必須。"
     echo "  -s <文字列> : 抽出する文字列をカンマ区切りで指定 (例: \"G111,G3333\")。必須。"
-    echo "  -H <行数>   : スキップするヘッダーの行数 (デフォルト: 0)。"
-    echo "  -F <行数>   : スキップするフッターの行数 (デフォルト: 0)。"
-    echo "  -h           : このヘルプメッセージを表示する。"
+    echo "  -h          : このヘルプメッセージを表示する。"
     exit 1
 }
 
 # --- オプション解析 ---
-while getopts "c:s:H:F:h" opt; do
+while getopts "c:s:h" opt; do
     case ${opt} in
         c)
             COLUMN=${OPTARG}
             ;;
         s)
             MATCH_STRINGS=${OPTARG}
-            ;;
-        H)
-            HEADER_LINES=${OPTARG}
-            ;;
-        F)
-            FOOTER_LINES=${OPTARG}
             ;;
         h)
             usage
@@ -83,48 +79,80 @@ for file in "$@"; do
         continue
     fi
 
-    TOTAL_LINES=$(wc -l < "$file")
-    
-    # ヘッダーとフッターの合計が総行数以上でないかチェック
-    if [ $((HEADER_LINES + FOOTER_LINES)) -ge ${TOTAL_LINES} ]; then
-        # 全ての行がスキップ対象なので、何も出力せずに次のファイルへ
+    # 行数が2行未満（TOP/ENDが揃わない）の場合はスキップ
+    if [ $(wc -l < "$file") -lt 2 ]; then
+        echo "警告: ファイルの行数が2行未満です。スキップします: $file" >&2
         continue
     fi
 
-    START_LINE=$((HEADER_LINES + 1))
-    END_LINE=$((TOTAL_LINES - FOOTER_LINES))
-    
-    # awkを使用してCSVをフィルタリング
+    # awkを使用してCSVをフィルタリングおよび再構成
     awk -v col="${COLUMN}" \
         -v patterns="${MATCH_STRINGS}" \
-        -v start_line="${START_LINE}" \
-        -v end_line="${END_LINE}" \
     '
     BEGIN {
         # FPATはフィールドのパターンを定義する。
         # 1. ダブルクォートで囲まれたフィールド: "[^"]*"
         # 2. クォートなしのフィールド (カンマ以外): [^,]+
         FPAT = "(\"[^\"]*\")|([^,]+)"
-        
+        OFS = ","
+
         # 抽出する文字列を連想配列に格納して高速参照
         split(patterns, pattern_array, ",")
         for (p in pattern_array) {
             match_targets[pattern_array[p]] = 1
         }
     }
-    
-    # 指定された範囲内の行のみを処理
-    (NR >= start_line && NR <= end_line) {
-        # 指定された列のフィールド値を取得
-        field = $col
-        
-        # フィールドがダブルクォートで囲まれている場合、それを取り除く
-        gsub(/^"|"$/, "", field)
-        
-        # フィールド値が抽出対象の文字列と一致するかチェック
-        if (field in match_targets) {
-            print $0
+
+    # 全ての行を配列に格納
+    { lines[FNR] = $0 }
+
+    END {
+        # --- TOP/ENDレコードの形式を検証 ---
+        $0 = lines[1]
+        field2_top = $2
+        gsub(/^"|"$/, "", field2_top)
+        if (field2_top != "TOP") {
+            print "エラー: 1行目がTOPレコードではありません。ファイル:", FILENAME > "/dev/stderr"
+            exit 1
         }
+
+        $0 = lines[FNR]
+        field2_end = $2
+        gsub(/^"|"$/, "", field2_end)
+        if (field2_end != "END") {
+            print "エラー: 最終行がENDレコードではありません。ファイル:", FILENAME > "/dev/stderr"
+            exit 1
+        }
+
+        # 1. TOPレコードはそのまま出力
+        print lines[1]
+
+        # 2. データ行 (2行目から最終-1行目) をフィルタリング
+        data_counter = 0
+        if (FNR > 2) {
+            for (i = 2; i < FNR; i++) {
+                $0 = lines[i] # 行を再パース
+
+                # 指定列の値を取得し、クォートを取り除く
+                field_to_check = $col
+                gsub(/^"|"$/, "", field_to_check)
+
+                # 抽出対象の文字列と一致するかチェック
+                if (field_to_check in match_targets) {
+                    data_counter++
+                    # 1列目のカウンタを再附番して出力
+                    $1 = "\"" data_counter "\""
+                    print # $0がOFSで再結合されて出力される
+                }
+            }
+        }
+
+        # 3. 新しいENDレコードを生成して出力
+        total_records = 1 + data_counter + 1
+        end_counter = total_records - 1
+        
+        # ユーザーの例 `”3”,"END","4"` に合わせて3フィールドでENDレコードを生成
+        printf "\"%d\",\"END\",\"%d\"\n", end_counter, total_records
     }
     ' "$file"
 done
