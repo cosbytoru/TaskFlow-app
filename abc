@@ -15,21 +15,23 @@
 #   -d <列番号> : '19700101'でマスクする日付カラムをカンマ区切りで指定。
 #   -r <文字列> : -cで指定した列の置換文字列 (デフォルト: "MASKED")。-k使用時は無効。
 #   -k           : -cで指定した列にカスタムマスク処理(先頭1文字表示、文字種/幅維持)を有効化。
-#   -H           : ヘッダー行(1行目)をマスク処理の対象外にする。
+#   -H <行数>   : マスク処理から除外するヘッダーの行数 (デフォルト: 0)。
+#   -F <行数>   : マスク処理から除外するフッターの行数 (デフォルト: 0)。
 #   -h           : このヘルプメッセージを表示する。
 #
 # 使用例:
-#   # 2列目をカスタムルールで、4列目をEpoch日でマスクする
-#   ./mask_csv.sh -c 2 -k -d 4 -H data.csv > masked_data.csv
+#   # ヘッダー1行、フッター2行を除外し、2列目をカスタムルールで、4列目をEpoch日でマスク
+#   ./mask_csv.sh -H 1 -F 2 -c 2 -k -d 4 data.csv > masked_data.csv
 #
 #================================================================
 
 # --- デフォルト設定 ---
 REPLACEMENT_STRING="\"MASKED\"" # デフォルトの置換文字列 (CSV形式のためクォート付き)
-MASK_HEADER=true
 CUSTOM_MASK_ENABLED=false
 MASK_COLS=""
 DATE_MASK_COLS=""
+HEADER_LINES=0
+FOOTER_LINES=0
 
 # --- ヘルプメッセージ表示関数 ---
 usage() {
@@ -38,13 +40,14 @@ usage() {
     echo "  -d <列番号> : '19700101'でマスクする日付カラムをカンマ区切りで指定。"
     echo "  -r <文字列> : -cで指定した列の置換文字列 (デフォルト: \"MASKED\")。-k使用時は無効。"
     echo "  -k           : -cで指定した列にカスタムマスク処理(先頭1文字表示、文字種/幅維持)を有効化。"
-    echo "  -H           : ヘッダー行(1行目)をマスク処理の対象外にする。"
+    echo "  -H <行数>   : マスク処理から除外するヘッダーの行数 (デフォルト: 0)。"
+    echo "  -F <行数>   : マスク処理から除外するフッターの行数 (デフォルト: 0)。"
     echo "  -h           : このヘルプメッセージを表示する。"
     exit 1
 }
 
 # --- オプション解析 ---
-while getopts "c:d:r:kHh" opt; do
+while getopts "c:d:r:kH:F:h" opt; do
     case ${opt} in
         c)
             MASK_COLS=${OPTARG}
@@ -60,7 +63,10 @@ while getopts "c:d:r:kHh" opt; do
             CUSTOM_MASK_ENABLED=true
             ;;
         H)
-            MASK_HEADER=false
+            HEADER_LINES=${OPTARG}
+            ;;
+        F)
+            FOOTER_LINES=${OPTARG}
             ;;
         h)
             usage
@@ -90,13 +96,17 @@ for file in "$@"; do
         echo "警告: ファイルが見つかりません。スキップします: $file" >&2
         continue
     fi
+    
+    TOTAL_LINES=$(wc -l < "$file")
 
     # awkを使用してCSVを安定して処理
     awk -v cols="${MASK_COLS}" \
         -v date_cols="${DATE_MASK_COLS}" \
         -v replacement="${REPLACEMENT_STRING}" \
-        -v mask_header="${MASK_HEADER}" \
         -v custom_mask_enabled="${CUSTOM_MASK_ENABLED}" \
+        -v header_lines="${HEADER_LINES}" \
+        -v footer_lines="${FOOTER_LINES}" \
+        -v total_lines="${TOTAL_LINES}" \
     '
     # 高度なマスク処理を行うAWK関数:
     # - 最初の1文字を表示する
@@ -141,7 +151,11 @@ for file in "$@"; do
 
     # 各行を処理
     {
-        if (FNR == 1 && mask_header == "false") { print; next }
+        # ヘッダー行またはフッター行の場合は、何もせずにそのまま出力
+        if (FNR <= header_lines || (total_lines - FNR) < footer_lines) {
+            print $0
+            next
+        }
 
         for (i = 1; i <= NF; i++) {
             is_quoted = (substr($i, 1, 1) == "\"")
@@ -165,3 +179,4 @@ for file in "$@"; do
     }
     ' "$file"
 done
+
