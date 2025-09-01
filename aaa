@@ -172,8 +172,13 @@ BEGIN {
             is_quoted = (substr($col_num, 1, 1) == "\"")
             content = is_quoted ? substr($col_num, 2, length($col_num) - 2) : $col_num
             if (length(content) > 0) {
-                gsub(/./, "*", content) # 全ての文字を'*'に置換
-                $col_num = is_quoted ? "\"" content "\"" : content
+                # gsubではなく、文字の長さ分だけ"*"を生成する確実な方法に変更
+                char_length = length(content)
+                masked_content = ""
+                for (j = 1; j <= char_length; j++) {
+                    masked_content = masked_content "*"
+                }
+                $col_num = is_quoted ? "\"" masked_content "\"" : masked_content
             }
         }
     }
@@ -208,7 +213,12 @@ for file in "$@"; do
     TOTAL_LINES=0
     # フッター処理のために総行数が必要な場合のみ計算する
     if [ "${FOOTER_LINES}" -gt 0 ]; then
-        TOTAL_LINES=$(wc -l < "$file")
+        # 文字コード変換を考慮し、変換後のストリームから行数をカウントする
+        if [ -n "${ENCODING}" ]; then
+            TOTAL_LINES=$(iconv -f "${ENCODING}" -t UTF-8 -- "$file" | wc -l)
+        else
+            TOTAL_LINES=$(wc -l < "$file")
+        fi
     fi
 
     # awkコマンドの共通部分を定義
