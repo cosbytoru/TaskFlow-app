@@ -157,21 +157,30 @@ for file in "$@"; do
             next
         }
 
-        for (i = 1; i <= NF; i++) {
-            is_quoted = (substr($i, 1, 1) == "\"")
-
-            # 日付のマスク処理を優先
-            if (i in date_mask_targets) {
-                $i = is_quoted ? QUOTED_EPOCH_DATE : EPOCH_DATE
+        # 日付のマスク処理を優先。指定された日付カラムをループ処理。
+        for (col_num in date_mask_targets) {
+            # この行にそのカラムが存在する場合のみ処理する
+            if (col_num > 0 && col_num <= NF) {
+                is_quoted = (substr($col_num, 1, 1) == "\"")
+                $col_num = is_quoted ? QUOTED_EPOCH_DATE : EPOCH_DATE
             }
-            # 次に通常のマスク処理
-            else if (i in mask_targets) {
+        }
+
+        # 次に通常のマスク処理。指定された一般マスクカラムをループ処理。
+        for (col_num in mask_targets) {
+            # 日付として既にマスク済みの場合はスキップ
+            if (col_num in date_mask_targets) {
+                continue
+            }
+            # この行にそのカラムが存在する場合のみ処理する
+            if (col_num > 0 && col_num <= NF) {
                 if (custom_mask_enabled == "true") {
-                    content_to_mask = is_quoted ? substr($i, 2, length($i) - 2) : $i
+                    is_quoted = (substr($col_num, 1, 1) == "\"")
+                    content_to_mask = is_quoted ? substr($col_num, 2, length($col_num) - 2) : $col_num
                     masked_content = custom_mask(content_to_mask)
-                    $i = is_quoted ? "\"" masked_content "\"" : masked_content
+                    $col_num = is_quoted ? "\"" masked_content "\"" : masked_content
                 } else {
-                    $i = replacement
+                    $col_num = replacement
                 }
             }
         }
