@@ -112,8 +112,9 @@ for file in "$@"; do
     # - 最初の1文字を表示する
     # - 2文字目以降を以下のルールで置換する:
     #   - 数字は "0"
-    #   - 全角文字(マルチバイト文字)は "＊"
-    #   - その他の半角文字は "*"
+    #   - 半角カタカナは "*"
+    #   - その他の全角文字(マルチバイト文字)は "＊"
+    #   - その他の半角英記号は "*"
     function custom_mask(str,    # local variables
                          result, first_char, i, char, masked_part) {
         if (length(str) <= 1) { return str; }
@@ -121,9 +122,15 @@ for file in "$@"; do
         masked_part = "";
         for (i = 2; i <= length(str); i++) {
             char = substr(str, i, 1);
-            if (char ~ /[0-9]/) { masked_part = masked_part "0"; }
-            else if (char ~ /[^\x01-\x7E]/) { masked_part = masked_part "＊"; }
-            else { masked_part = masked_part "*"; }
+            if (char ~ /[0-9]/) {
+                masked_part = masked_part "0";
+            } else if (char ~ /[ｦ-ﾟ]/) { # 半角カタカナを判定
+                masked_part = masked_part "*";
+            } else if (char ~ /[^\x01-\x7E]/) { # その他の全角文字を判定
+                masked_part = masked_part "＊";
+            } else { # 上記以外の半角英記号
+                masked_part = masked_part "*";
+            }
         }
         return first_char masked_part;
     }
