@@ -1,0 +1,217 @@
+#!/bin/bash
+
+#================================================================
+# CSVマスク化ツール (改訂版)
+#
+# 説明:
+#   CSVファイル内の指定されたカラムをマスク化するツールです。
+#   ダブルクォーテーションで囲まれたフィールドも正しく処理します。
+#   マルチバイト文字(半角カナ等)の処理にgawk拡張機能を使用します。
+#
+# 依存関係:
+#   GNU Awk (gawk) が必要です。
+#
+# 使用方法:
+#  ./mask_csv.sh [options][file1.csv...]
+#
+# オプション:
+#   -c <列番号> : マスクするカラム番号をカンマ区切りで指定 (例: '2,4')。
+#   -d <列番号> : '19700101'でマスクする日付カラムをカンマ区切りで指定。
+#   -r <文字列> : -cで指定した列の置換文字列 (デフォルト: "MASKED")。-k使用時は無効。
+#   -k          : -cで指定した列にカスタムマスク処理(先頭1文字表示、文字種/幅維持)を有効化。
+#   -H <行数>   : マスク処理から除外するヘッダーの行数 (デフォルト: 0)。
+#   -F <行数>   : マスク処理から除外するフッターの行数 (デフォルト: 0)。
+#   -E <文字コード> : 入力ファイルの文字コードを指定 (例: SHIFT_JIS)。
+#                   半角カナ等がマスクされない場合にお試しください。
+#   -h          : このヘルプメッセージを表示する。
+#
+# 使用例:
+#   # Shift_JISのファイルを指定し、2列目をカスタムルールでマスク
+#  ./mask_csv.sh -E SHIFT_JIS -c 2 -k data.csv > masked_data.csv
+#
+#================================================================
+
+# --- 依存関係の確認 ---
+# このスクリプトはgawkの拡張機能に依存しているため、gawkの存在を確認する
+if! command -v gawk &> /dev/null; then
+    echo "エラー: このスクリプトの実行にはGNU Awk (gawk) が必要です。" >&2
+    echo "gawkをインストールしてください (例: 'sudo apt-get install gawk' または 'sudo yum install gawk')。" >&2
+    exit 1
+fi
+
+# --- デフォルト設定 ---
+REPLACEMENT_STRING=\"\\\"MASKED\\\"\" # デフォルトの置換文字列 (CSV形式のためクォート付き)
+CUSTOM_MASK_ENABLED=false
+MASK_COLS=""
+DATE_MASK_COLS=""
+HEADER_LINES=0
+FOOTER_LINES=0
+ENCODING=""
+
+# --- ヘルプメッセージ表示関数 ---
+usage() {
+    echo "使用方法: $0 [options][file1.csv...]"
+    echo "  -c <列番号> : マスクするカラム番号をカンマ区切りで指定 (例: '2,4')。"
+    echo "  -d <列番号> : '19700101'でマスクする日付カラムをカンマ区切りで指定。"
+    echo "  -r <文字列> : -cで指定した列の置換文字列 (デフォルト: \\\"MASKED\\\")。-k使用時は無効。"
+    echo "  -k          : -cで指定した列にカスタムマスク処理(先頭1文字表示、文字種/幅維持)を有効化。"
+    echo "  -H <行数>   : マスク処理から除外するヘッダーの行数 (デフォルト: 0)。"
+    echo "  -F <行数>   : マスク処理から除外するフッターの行数 (デフォルト: 0)。"
+    echo "  -E <文字コード> : 入力ファイルの文字コードを指定 (例: SHIFT_JIS)。"
+    echo "                  半角カナ等がマスクされない場合にお試しください。"
+    echo "  -h          : このヘルプメッセージを表示する。"
+    exit 1
+}
+
+# --- オプション解析 ---
+while getopts "c:d:r:kH:F:E:h" opt; do
+    case ${opt} in
+        c) MASK_COLS=${OPTARG} ;;
+        d) DATE_MASK_COLS=${OPTARG} ;;
+        r) REPLACEMENT_STRING=\"\\\"${OPTARG}\\\"\" ;;
+        k) CUSTOM_MASK_ENABLED=true ;;
+        H) HEADER_LINES=${OPTARG} ;;
+        F) FOOTER_LINES=${OPTARG} ;;
+        E) ENCODING=${OPTARG} ;;
+        h) usage ;;
+        \\?) usage ;;
+    esac
+done
+shift $((OPTIND - 1))
+
+# --- 必須引数の検証 ---
+if &&; then
+    echo "エラー: -c または -d のいずれかを指定する必要があります。-hでヘルプを表示します。" >&2
+    exit 1
+fi
+
+if [ $# -eq 0 ]; then
+    echo "エラー: 処理対象のファイルが指定されていません。-hでヘルプを表示します。" >&2
+    exit 1
+fi
+
+# --- awkスクリプトをヒアドキュメントで変数に格納 ---
+read -r -d '' AWK_SCRIPT << 'EOF'
+# 高度なマスク処理を行うAWK関数:
+# - 最初の1文字を表示する
+# - 2文字目以降を以下のルールで置換する:
+#   - 数字は "0"
+#   - 半角カタカナは "*"
+#   - その他の全角文字(マルチバイト文字)は "＊"
+#   - その他の半角英記号は "*"
+function custom_mask(str,     # local variables
+                     result, first_char, i, char, masked_part, n, chars) {
+    # gawkの拡張機能 split(str, arr, "") を使用して、
+    # マルチバイト文字列を文字単位で配列に安全に分割する。
+    # これが、バイト単位で処理してしまう substr() ループの根本的な問題を解決する。
+    n = split(str, chars, "");
+
+    if (n <= 1) { return str; }
+
+    first_char = chars;
+    masked_part = "";
+
+    # 配列を2番目の要素からループ処理する
+    for (i = 2; i <= n; i++) {
+        char = chars[i];
+        if (char ~ /[0-9]/) {
+            masked_part = masked_part "0";
+        } else if (char ~ /[ｦ-ﾟ]/) { # 半角カタカナを判定
+            masked_part = masked_part "*";
+        } else if (char ~ /[^\\x01-\\x7E]/) { # その他の全角文字を判定
+            masked_part = masked_part "＊";
+        } else { # 上記以外の半角英記号
+            masked_part = masked_part "*";
+        }
+    }
+    return first_char masked_part;
+}
+
+BEGIN {
+    FPAT = "(\\\"[^\\\"]*\\\")|([^,]*)"
+    OFS = ","
+    EPOCH_DATE = "19700101"
+    QUOTED_EPOCH_DATE = "\"" EPOCH_DATE "\""
+
+    if (cols!= "") {
+        split(cols, col_array, ",")
+        for (i in col_array) { mask_targets[col_array[i]] = 1 }
+    }
+    if (date_cols!= "") {
+        split(date_cols, date_col_array, ",")
+        for (i in date_col_array) { date_mask_targets[date_col_array[i]] = 1 }
+    }
+}
+
+{
+    if (FNR <= header_lines |
+
+| (total_lines > 0 && (total_lines - FNR) < footer_lines)) {
+        print $0
+        next
+    }
+
+    for (col_num in date_mask_targets) {
+        if (col_num > 0 && col_num <= NF) {
+            is_quoted = (substr($col_num, 1, 1) == "\"")
+            content = is_quoted? substr($col_num, 2, length($col_num) - 2) : $col_num
+            if (length(content) > 0) {
+                $col_num = is_quoted? QUOTED_EPOCH_DATE : EPOCH_DATE
+            }
+        }
+    }
+
+    for (col_num in mask_targets) {
+        if (col_num in date_mask_targets) { continue }
+        if (col_num > 0 && col_num <= NF) {
+            is_quoted = (substr($col_num, 1, 1) == "\"")
+            content = is_quoted? substr($col_num, 2, length($col_num) - 2) : $col_num
+            if (length(content) > 0) {
+                if (custom_mask_enabled == "true") {
+                    masked_content = custom_mask(content)
+                    $col_num = is_quoted? "\"" masked_content "\"" : masked_content
+                } else {
+                    $col_num = replacement
+                }
+            }
+        }
+    }
+    print
+}
+EOF
+
+# --- メイン処理ループ ---
+for file in "$@"; do
+    if [! -f "$file" ]; then
+        echo "警告: ファイルが見つかりません。スキップします: $file" >&2
+        continue
+    fi
+    
+    TOTAL_LINES=0
+    if; then
+        TOTAL_LINES=$(wc -l < "$file")
+    fi
+
+    # gawkコマンドを明示的に使用
+    AWK_COMMAND_ARRAY=(
+        gawk
+        -v "cols=${MASK_COLS}"
+        -v "date_cols=${DATE_MASK_COLS}"
+        -v "replacement=${REPLACEMENT_STRING}"
+        -v "custom_mask_enabled=${CUSTOM_MASK_ENABLED}"
+        -v "header_lines=${HEADER_LINES}"
+        -v "footer_lines=${FOOTER_LINES}"
+        -v "total_lines=${TOTAL_LINES}"
+        "$AWK_SCRIPT"
+    )
+    
+    if; then
+        if! command -v iconv &> /dev/null; then
+            echo "エラー: iconvコマンドが見つかりません。-Eオプションは使用できません。" >&2
+            exit 1
+        fi
+        iconv -f "${ENCODING}" -t UTF-8 -- "$file" | LC_ALL=C.UTF-8 "${AWK_COMMAND_ARRAY[@]}"
+    else
+        LC_ALL=C.UTF-8 "${AWK_COMMAND_ARRAY[@]}" "$file"
+    fi
+done
