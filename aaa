@@ -99,15 +99,20 @@ fi
 
 # --- awkスクリプトをヒアドキュメントで変数に格納 ---
 read -r -d '' AWK_SCRIPT << 'EOF'
-# 高度なマスク処理を行うAWK関数:
-# - 最初の1文字を表示する
-# - 2文字目以降を以下のルールで置換する:
-#   - 数字は "0"
-#   - 半角カタカナは "*"
-#   - その他の全角文字(マルチバイト文字)は "＊"
-#   - その他の半角英記号は "*"
+# 高度なマスク処理を行うAWK関数
 function custom_mask(str,    # local variables
-                     result, first_char, i, char, masked_part) {
+                     result, first_char, i, char, masked_part, masked_str) {
+
+    # 【対策】まず、扱いにくい半角カタカナが文字列に含まれているかを確認します。
+    # 含まれている場合は、より安全な全体置換方式でマスクします。
+    if (str ~ /[ｦｧｨｩｪｫｬｭｮｯｰｱｲｳｴｵｶｷｸｹｺｻｼｽｾｿﾀﾁﾂﾃﾄﾅﾆﾇﾈﾉﾊﾋﾌﾍﾎﾏﾐﾑﾒﾓﾔﾕﾖﾗﾘﾙﾚﾛﾜﾝﾞﾟ]/) {
+        masked_str = str;
+        # 全ての文字を半角アスタリスクに置換します。
+        gsub(/./, "*", masked_str);
+        return masked_str;
+    }
+
+    # 半角カタカナが含まれていない場合は、これまで通りの処理を続けます。
     if (length(str) <= 1) { return str; }
     first_char = substr(str, 1, 1);
     masked_part = "";
@@ -115,10 +120,7 @@ function custom_mask(str,    # local variables
         char = substr(str, i, 1);
         if (char ~ /[0-9]/) {
             masked_part = masked_part "0";
-        # 半角カタカナを範囲指定ではなく、文字のリストで判定する
-        } else if (char ~ /[ｦｧｨｩｪｫｬｭｮｯｰｱｲｳｴｵｶｷｸｹｺｻｼｽｾｿﾀﾁﾂﾃﾄﾅﾆﾇﾈﾉﾊﾋﾌﾍﾎﾏﾐﾑﾒﾓﾔﾕﾖﾗﾘﾙﾚﾛﾜﾝﾞﾟ]/) {
-            masked_part = masked_part "*";
-        } else if (char ~ /[^\x01-\x7E]/) { # その他の全角文字を判定
+        } else if (char ~ /[^\x01-\x7E]/) { # 全角文字を判定
             masked_part = masked_part "＊";
         } else { # 上記以外の半角英記号
             masked_part = masked_part "*";
