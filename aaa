@@ -1,14 +1,3 @@
-[,]$  tail -n 3 TPC_M_0291_20250822_01.csv > ./test.csv
-[,]$ ./mask_csv.sh -K 8,9,10,11,12,13 ./test.csv > ./masked_data.csv
-[,]$
-[,]$ cat masked_data.csv
-,"2649",,,"DATA",,,"********",,,"****",,,"0008",,,"000131091",,,"99000",,,"鈴木　まゆこ",,,
-,"2650",,,"DATA",,,"********",,,"****",,,"0854",,,"000146272",,,"99000",,,"鈴木　まゆこ",,,
-,"2651",,,"END",,,"****",
-[,]$ tail -n 3 TPC_M_0291_20250822_01.csv
-"2649","DATA","TTT03328","4000","0008","000131091","99000","鈴木　まゆこ"
-"2650","DATA","TTT03328","4001","0854","000146272","99000","鈴木　まゆこ"
-"2651","END","2652"
 #!/bin/bash
 
 #================================================================
@@ -157,15 +146,21 @@ while (<>) {
         next;
     }
 
-    # FPATのPerl版正規表現でフィールドを抽出
-    my @fields = $line =~ m/([^,"]*|"[^"]*")/g;
+    # 引用符内のカンマを考慮した、より堅牢なCSV分割処理
+    my @fields = split(/,(?=(?:[^"]*"[^"]*")*[^"]*$)/, $line);
     my @new_fields;
 
     for my $i (0 .. $#fields) {
         my $col_num = $i + 1;
-        my $field = $fields[$i];
-        my $is_quoted = ($field =~ s/^"|"//g);
-        my $content = $field;
+        my $field_raw = $fields[$i];
+        
+        # フィールドが引用符で囲まれているか確認し、除去する
+        my $is_quoted = 0;
+        my $content = $field_raw;
+        if ($content =~ s/^"//) {
+            $content =~ s/"$//;
+            $is_quoted = 1;
+        }
 
         if (length($content) > 0) {
             # 優先順位: 日付 -> 半角カナ -> 通常マスク
@@ -179,20 +174,27 @@ while (<>) {
                 if ($custom_mask_enabled) {
                     my $first_char = substr($content, 0, 1);
                     my $rest = substr($content, 1);
-                    $rest =~ s/(\d)/0/g;
-                    $rest =~ s/([^\x00-\x7F])/＊/g; # 全角
-                    $rest =~ s/([^\d＊])/ /g; # 数字と全角以外
-                    $rest =~ s/ / /g; # 半角アスタリスク
-                    $content = $first_char . $rest;
+                    my $masked_rest = "";
+                    # 文字列の残りを1文字ずつ判定して再構築する
+                    for my $char (split //, $rest) {
+                        if ($char =~ /\d/) {
+                            $masked_rest .= "0";
+                        } elsif ($char =~ /[^\x00-\x7F]/) { # 全角
+                            $masked_rest .= "＊";
+                        } else { # その他の半角
+                            $masked_rest .= "*";
+                        }
+                    }
+                    $content = $first_char . $masked_rest;
                 } else {
                     $content = $replacement;
                 }
             }
         }
         
-        # クォートを戻す
-        $field = $is_quoted ? '"' . $content . '"' : $content;
-        push @new_fields, $field;
+        # 最初に引用符があった場合は、再度追加する
+        my $final_field = $is_quoted ? '"' . $content . '"' : $content;
+        push @new_fields, $final_field;
     }
 
     print join(',', @new_fields) . "\n";
