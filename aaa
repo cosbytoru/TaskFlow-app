@@ -1,8 +1,4 @@
-./mask_csv.sh -K 8,9,10,11,12,13 ./test.csv > ./masked_data.csv
-syntax error at -e line 18, near "$cols if"
-syntax error at -e line 20, near "$date_cols if"
-syntax error at -e line 22, near "$hankaku_cols if"
-Execution of -e aborted due to compilation errors.#!/bin/bash
+#!/bin/bash
 
 #================================================================
 # CSVマスク化ツール
@@ -110,6 +106,7 @@ read -r -d '' PERL_SCRIPT << 'EOF'
 use strict;
 use warnings;
 use utf8;
+binmode(STDIN, ":utf8");
 binmode(STDOUT, ":utf8");
 
 # --- 設定値の読み込み ---
@@ -124,11 +121,17 @@ my $total_lines = $ENV{'TOTAL_LINES'};
 
 # --- マスク対象カラムをハッシュに格納 ---
 my %mask_targets;
-$mask_targets{$_} = 1 for split /,/, $cols if $cols;
+if ($cols) {
+    for my $col (split /,/, $cols) { $mask_targets{$col} = 1; }
+}
 my %date_mask_targets;
-$date_mask_targets{$_} = 1 for split /,/, $date_cols if $date_cols;
+if ($date_cols) {
+    for my $col (split /,/, $date_cols) { $date_mask_targets{$col} = 1; }
+}
 my %hankaku_kana_targets;
-$hankaku_kana_targets{$_} = 1 for split /,/, $hankaku_cols if $hankaku_cols;
+if ($hankaku_cols) {
+    for my $col (split /,/, $hankaku_cols) { $hankaku_kana_targets{$col} = 1; }
+}
 
 my $epoch_date = '19700101';
 
