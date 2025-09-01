@@ -17,6 +17,7 @@
 #   -K <列番号> : 【半角カナ用】全体を'*'でマスクするカラムをカンマ区切りで指定。
 #   -r <文字列> : -cで指定した列の置換文字列 (デフォルト: "MASKED")。-k使用時は無効。
 #   -k           : -cで指定した列にカスタムマスク処理(先頭1文字表示)を有効化。
+#                (半角カナの場合は、先頭文字を繰り返す特殊なマスク処理を行います)
 #   -H <行数>   : マスク処理から除外するヘッダーの行数 (デフォルト: 0)。
 #   -F <行数>   : マスク処理から除外するフッターの行数 (デフォルト: 0)。
 #   -E <文字コード> : 入力ファイルの文字コードを指定 (例: SHIFT_JIS)。
@@ -46,6 +47,7 @@ usage() {
     echo "  -K <列番号> : 【半角カナ用】全体を'*'でマスクするカラムをカンマ区切りで指定。"
     echo "  -r <文字列> : -cで指定した列の置換文字列 (デフォルト: \"MASKED\")。-k使用時は無効。"
     echo "  -k           : -cで指定した列にカスタムマスク処理(先頭1文字表示)を有効化。"
+    echo "               (半角カナの場合は、先頭文字を繰り返す特殊なマスク処理を行います)"
     echo "  -H <行数>   : マスク処理から除外するヘッダーの行数 (デフォルト: 0)。"
     echo "  -F <行数>   : マスク処理から除外するフッターの行数 (デフォルト: 0)。"
     echo "  -E <文字コード> : 入力ファイルの文字コードを指定 (例: SHIFT_JIS)。"
@@ -172,20 +174,29 @@ while (<>) {
             }
             elsif (exists $mask_targets{$col_num}) {
                 if ($custom_mask_enabled) {
-                    my $first_char = substr($content, 0, 1);
-                    my $rest = substr($content, 1);
-                    my $masked_rest = "";
-                    # 文字列の残りを1文字ずつ判定して再構築する
-                    for my $char (split //, $rest) {
-                        if ($char =~ /\d/) {
-                            $masked_rest .= "0";
-                        } elsif ($char =~ /[^\x00-\x7F]/) { # 全角
-                            $masked_rest .= "＊";
-                        } else { # その他の半角
-                            $masked_rest .= "*";
+                    # 半角カナが含まれる場合は特殊なマスク処理を行う
+                    if ($content =~ /[ｦｧｨｩｪｫｬｭｮｯｰｱｲｳｴｵｶｷｸｹｺｻｼｽｾｿﾀﾁﾂﾃﾄﾅﾆﾇﾈﾉﾊﾋﾌﾍﾎﾏﾐﾑﾒﾓﾔﾕﾖﾗﾘﾙﾚﾛﾜﾝﾞﾟ]/) {
+                        my $first_char = substr($content, 0, 1);
+                        $content = $first_char x length($content);
+                    } else {
+                        # 通常のカスタムマスク処理
+                        if (length($content) > 1) {
+                            my $first_char = substr($content, 0, 1);
+                            my $rest = substr($content, 1);
+                            my $masked_rest = "";
+                            # 文字列の残りを1文字ずつ判定して再構築する
+                            for my $char (split //, $rest) {
+                                if ($char =~ /\d/) {
+                                    $masked_rest .= "0";
+                                } elsif ($char =~ /[^\x00-\x7F]/) { # 全角
+                                    $masked_rest .= "＊";
+                                } else { # その他の半角
+                                    $masked_rest .= "*";
+                                }
+                            }
+                            $content = $first_char . $masked_rest;
                         }
                     }
-                    $content = $first_char . $masked_rest;
                 } else {
                     $content = $replacement;
                 }
