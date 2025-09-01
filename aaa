@@ -6,6 +6,7 @@
 # 説明:
 #   CSVファイル内の指定されたカラムをマスク化するツールです。
 #   ダブルクォーテーションで囲まれたフィールドも正しく処理します。
+#   (内部処理をPerlに変更し、文字コードの安定性を向上させました)
 #
 # 使用方法:
 #   ./mask_csv.sh [options] [file1.csv ...]
@@ -28,7 +29,7 @@
 #================================================================
 
 # --- デフォルト設定 ---
-REPLACEMENT_STRING="\"MASKED\"" # デフォルトの置換文字列 (CSV形式のためクォート付き)
+REPLACEMENT_STRING="MASKED" # Perl側でクォート処理するため、ここでは不要
 CUSTOM_MASK_ENABLED=false
 MASK_COLS=""
 DATE_MASK_COLS=""
@@ -65,8 +66,7 @@ while getopts "c:d:K:r:kH:F:E:h" opt; do
             HANKAKU_KANA_COLS=${OPTARG}
             ;;
         r)
-            # ユーザー指定の文字列をCSV形式のためダブルクォートで囲む
-            REPLACEMENT_STRING="\"${OPTARG}\""
+            REPLACEMENT_STRING=${OPTARG}
             ;;
         k)
             CUSTOM_MASK_ENABLED=true
@@ -101,105 +101,83 @@ if [ $# -eq 0 ]; then
     exit 1
 fi
 
-# --- awkスクリプトをヒアドキュメントで変数に格納 ---
-read -r -d '' AWK_SCRIPT << 'EOF'
-# 高度なマスク処理を行うAWK関数 (半角カナ判定は削除)
-function custom_mask(str,    # local variables
-                     result, first_char, i, char, masked_part) {
-    if (length(str) <= 1) { return str; }
-    first_char = substr(str, 1, 1);
-    masked_part = "";
-    for (i = 2; i <= length(str); i++) {
-        char = substr(str, i, 1);
-        if (char ~ /[0-9]/) {
-            masked_part = masked_part "0";
-        } else if (char ~ /[^\x01-\x7E]/) { # 全角文字を判定
-            masked_part = masked_part "＊";
-        } else { # 上記以外の半角英記号
-            masked_part = masked_part "*";
-        }
-    }
-    return first_char masked_part;
-}
+# --- Perlスクリプトをヒアドキュメントで変数に格納 ---
+read -r -d '' PERL_SCRIPT << 'EOF'
+use strict;
+use warnings;
+use utf8;
+binmode(STDOUT, ":utf8");
 
-BEGIN {
-    # FPATはフィールドのパターンを定義する。
-    # 1. ダブルクォートで囲まれたフィールド: "[^"]*"
-    # 2. クォートなしのフィールド (カンマ以外が0文字以上): [^,]*
-    FPAT = "(\"[^\"]*\")|([^,]*)"
-    OFS = ","
-    EPOCH_DATE = "19700101"
-    QUOTED_EPOCH_DATE = "\"" EPOCH_DATE "\""
+# --- 設定値の読み込み ---
+my $cols = $ENV{'MASK_COLS'};
+my $date_cols = $ENV{'DATE_MASK_COLS'};
+my $hankaku_cols = $ENV{'HANKAKU_KANA_COLS'};
+my $replacement = $ENV{'REPLACEMENT_STRING'};
+my $custom_mask_enabled = $ENV{'CUSTOM_MASK_ENABLED'};
+my $header_lines = $ENV{'HEADER_LINES'};
+my $footer_lines = $ENV{'FOOTER_LINES'};
+my $total_lines = $ENV{'TOTAL_LINES'};
 
-    # マスク対象のカラムを高速に参照できるよう連想配列に格納
-    if (cols != "") {
-        split(cols, col_array, ",")
-        for (i in col_array) { mask_targets[col_array[i]] = 1 }
-    }
-    if (date_cols != "") {
-        split(date_cols, date_col_array, ",")
-        for (i in date_col_array) { date_mask_targets[date_col_array[i]] = 1 }
-    }
-    if (hankaku_cols != "") {
-        split(hankaku_cols, hankaku_col_array, ",")
-        for (i in hankaku_col_array) { hankaku_kana_targets[hankaku_col_array[i]] = 1 }
-    }
-}
+# --- マスク対象カラムをハッシュに格納 ---
+my %mask_targets;
+$mask_targets{$_} = 1 for split /,/, $cols if $cols;
+my %date_mask_targets;
+$date_mask_targets{$_} = 1 for split /,/, $date_cols if $date_cols;
+my %hankaku_kana_targets;
+$hankaku_kana_targets{$_} = 1 for split /,/, $hankaku_cols if $hankaku_cols;
 
-# 各行を処理
-{
-    # ヘッダー行またはフッター行の場合は、何もせずにそのまま出力
-    if (FNR <= header_lines || (total_lines > 0 && (total_lines - FNR) < footer_lines)) {
-        print $0
-        next
+my $epoch_date = '19700101';
+
+# --- メイン処理 ---
+while (<>) {
+    chomp;
+    my $line = $_;
+
+    # ヘッダー/フッター行はそのまま出力
+    if ($. <= $header_lines or ($total_lines > 0 and ($total_lines - $.) < $footer_lines)) {
+        print "$line\n";
+        next;
     }
 
-    # 日付のマスク処理を優先
-    for (col_num in date_mask_targets) {
-        if (col_num > 0 && col_num <= NF) {
-            is_quoted = (substr($col_num, 1, 1) == "\"")
-            content = is_quoted ? substr($col_num, 2, length($col_num) - 2) : $col_num
-            if (length(content) > 0) {
-                $col_num = is_quoted ? QUOTED_EPOCH_DATE : EPOCH_DATE
+    # FPATのPerl版正規表現でフィールドを抽出
+    my @fields = $line =~ m/([^,"]*|"[^"]*")/g;
+    my @new_fields;
+
+    for my $i (0 .. $#fields) {
+        my $col_num = $i + 1;
+        my $field = $fields[$i];
+        my $is_quoted = ($field =~ s/^"|"//g);
+        my $content = $field;
+
+        if (length($content) > 0) {
+            # 優先順位: 日付 -> 半角カナ -> 通常マスク
+            if (exists $date_mask_targets{$col_num}) {
+                $content = $epoch_date;
             }
-        }
-    }
-    
-    # 次に半角カナ列のマスク処理
-    for (col_num in hankaku_kana_targets) {
-        if (col_num in date_mask_targets) { continue } # 日付マスク済みはスキップ
-        if (col_num > 0 && col_num <= NF) {
-            is_quoted = (substr($col_num, 1, 1) == "\"")
-            content = is_quoted ? substr($col_num, 2, length($col_num) - 2) : $col_num
-            if (length(content) > 0) {
-                # gsubではなく、文字の長さ分だけ"*"を生成する確実な方法に変更
-                char_length = length(content)
-                masked_content = ""
-                for (j = 1; j <= char_length; j++) {
-                    masked_content = masked_content "*"
-                }
-                $col_num = is_quoted ? "\"" masked_content "\"" : masked_content
+            elsif (exists $hankaku_kana_targets{$col_num}) {
+                $content = '*' x length($content);
             }
-        }
-    }
-
-    # 最後に通常のマスク処理
-    for (col_num in mask_targets) {
-        if (col_num in date_mask_targets || col_num in hankaku_kana_targets) { continue } # 処理済みはスキップ
-        if (col_num > 0 && col_num <= NF) {
-            is_quoted = (substr($col_num, 1, 1) == "\"")
-            content = is_quoted ? substr($col_num, 2, length($col_num) - 2) : $col_num
-            if (length(content) > 0) {
-                if (custom_mask_enabled == "true") {
-                    masked_content = custom_mask(content)
-                    $col_num = is_quoted ? "\"" masked_content "\"" : masked_content
+            elsif (exists $mask_targets{$col_num}) {
+                if ($custom_mask_enabled) {
+                    my $first_char = substr($content, 0, 1);
+                    my $rest = substr($content, 1);
+                    $rest =~ s/(\d)/0/g;
+                    $rest =~ s/([^\x00-\x7F])/＊/g; # 全角
+                    $rest =~ s/([^\d＊])/ /g; # 数字と全角以外
+                    $rest =~ s/ / /g; # 半角アスタリスク
+                    $content = $first_char . $rest;
                 } else {
-                    $col_num = replacement
+                    $content = $replacement;
                 }
             }
         }
+        
+        # クォートを戻す
+        $field = $is_quoted ? '"' . $content . '"' : $content;
+        push @new_fields, $field;
     }
-    print
+
+    print join(',', @new_fields) . "\n";
 }
 EOF
 
@@ -210,40 +188,25 @@ for file in "$@"; do
         continue
     fi
     
+    export MASK_COLS HANKAKU_KANA_COLS DATE_MASK_COLS REPLACEMENT_STRING CUSTOM_MASK_ENABLED HEADER_LINES FOOTER_LINES
+    
     TOTAL_LINES=0
-    # フッター処理のために総行数が必要な場合のみ計算する
     if [ "${FOOTER_LINES}" -gt 0 ]; then
-        # 文字コード変換を考慮し、変換後のストリームから行数をカウントする
         if [ -n "${ENCODING}" ]; then
             TOTAL_LINES=$(iconv -f "${ENCODING}" -t UTF-8 -- "$file" | wc -l)
         else
             TOTAL_LINES=$(wc -l < "$file")
         fi
     fi
+    export TOTAL_LINES
 
-    # awkコマンドの共通部分を定義
-    AWK_COMMAND=(
-        awk
-        -v "cols=${MASK_COLS}"
-        -v "date_cols=${DATE_MASK_COLS}"
-        -v "hankaku_cols=${HANKAKU_KANA_COLS}"
-        -v "replacement=${REPLACEMENT_STRING}"
-        -v "custom_mask_enabled=${CUSTOM_MASK_ENABLED}"
-        -v "header_lines=${HEADER_LINES}"
-        -v "footer_lines=${FOOTER_LINES}"
-        -v "total_lines=${TOTAL_LINES}"
-        "$AWK_SCRIPT"
-    )
-    
     if [ -n "${ENCODING}" ]; then
         if ! command -v iconv &> /dev/null; then
             echo "エラー: iconvコマンドが見つかりません。-Eオプションは使用できません。" >&2
             exit 1
         fi
-        # iconvで文字コードを変換してからawkに渡す
-        iconv -f "${ENCODING}" -t UTF-8 -- "$file" | "${AWK_COMMAND[@]}"
+        iconv -f "${ENCODING}" -t UTF-8 -- "$file" | perl -e "$PERL_SCRIPT"
     else
-        # 直接awkにファイルを渡す
-        "${AWK_COMMAND[@]}" "$file"
+        perl -e "$PERL_SCRIPT" < "$file"
     fi
 done
