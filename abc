@@ -200,7 +200,7 @@ for file in "$@"; do
 
     # awkコマンドの共通部分を配列で定義
     AWK_COMMAND_ARRAY=(
-        LC_ALL=C.UTF-8 awk
+        awk
         -v "cols=${MASK_COLS}"
         -v "date_cols=${DATE_MASK_COLS}"
         -v "replacement=${REPLACEMENT_STRING}"
@@ -217,23 +217,10 @@ for file in "$@"; do
             exit 1
         fi
         # iconvで文字コードを変換してからawkに渡す
-        iconv -f "${ENCODING}" -t UTF-8 -- "$file" | "${AWK_COMMAND_ARRAY[@]}"
+        iconv -f "${ENCODING}" -t UTF-8 -- "$file" | LC_ALL=C.UTF-8 "${AWK_COMMAND_ARRAY[@]}"
     else
         # 直接awkにファイルを渡す
-        "${AWK_COMMAND_ARRAY[@]}" "$file"
+        LC_ALL=C.UTF-8 "${AWK_COMMAND_ARRAY[@]}" "$file"
     fi
 done
-```
 
-### 新しい使い方
-
-もしCSVファイルの文字コードが **Shift_JIS** である場合、以下のように `-E SHIFT_JIS` を付けて実行してください。
-
-```bash
-# Shift_JISのファイルの2列目をマスクする場合
-./mask_csv.sh -E SHIFT_JIS -c 2 -k your_file.csv
-```
-
-これにより、`"ｻﾄｳ ﾏﾕﾐ"` という文字列が、期待通り `"ｻ******"` のようにマスクされるはずです。
-
-お手数ですが、こちらの修正版で再度ご確認いただけますでしょうか。
