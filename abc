@@ -17,11 +17,13 @@
 #   -k           : -cで指定した列にカスタムマスク処理(先頭1文字表示、文字種/幅維持)を有効化。
 #   -H <行数>   : マスク処理から除外するヘッダーの行数 (デフォルト: 0)。
 #   -F <行数>   : マスク処理から除外するフッターの行数 (デフォルト: 0)。
+#   -E <文字コード> : 入力ファイルの文字コードを指定 (例: SHIFT_JIS)。
+#                     半角カナ等がマスクされない場合にお試しください。
 #   -h           : このヘルプメッセージを表示する。
 #
 # 使用例:
-#   # ヘッダー1行、フッター2行を除外し、2列目をカスタムルールで、4列目をEpoch日でマスク
-#   ./mask_csv.sh -H 1 -F 2 -c 2 -k -d 4 data.csv > masked_data.csv
+#   # Shift_JISのファイルを指定し、2列目をカスタムルールでマスク
+#   ./mask_csv.sh -E SHIFT_JIS -c 2 -k data.csv > masked_data.csv
 #
 #================================================================
 
@@ -32,6 +34,7 @@ MASK_COLS=""
 DATE_MASK_COLS=""
 HEADER_LINES=0
 FOOTER_LINES=0
+ENCODING=""
 
 # --- ヘルプメッセージ表示関数 ---
 usage() {
@@ -42,12 +45,14 @@ usage() {
     echo "  -k           : -cで指定した列にカスタムマスク処理(先頭1文字表示、文字種/幅維持)を有効化。"
     echo "  -H <行数>   : マスク処理から除外するヘッダーの行数 (デフォルト: 0)。"
     echo "  -F <行数>   : マスク処理から除外するフッターの行数 (デフォルト: 0)。"
+    echo "  -E <文字コード> : 入力ファイルの文字コードを指定 (例: SHIFT_JIS)。"
+    echo "                     半角カナ等がマスクされない場合にお試しください。"
     echo "  -h           : このヘルプメッセージを表示する。"
     exit 1
 }
 
 # --- オプション解析 ---
-while getopts "c:d:r:kH:F:h" opt; do
+while getopts "c:d:r:kH:F:E:h" opt; do
     case ${opt} in
         c)
             MASK_COLS=${OPTARG}
@@ -67,6 +72,9 @@ while getopts "c:d:r:kH:F:h" opt; do
             ;;
         F)
             FOOTER_LINES=${OPTARG}
+            ;;
+        E)
+            ENCODING=${OPTARG}
             ;;
         h)
             usage
@@ -89,6 +97,93 @@ if [ $# -eq 0 ]; then
     exit 1
 fi
 
+# --- awkスクリプトをヒアドキュメントで変数に格納 ---
+read -r -d '' AWK_SCRIPT << 'EOF'
+# 高度なマスク処理を行うAWK関数:
+# - 最初の1文字を表示する
+# - 2文字目以降を以下のルールで置換する:
+#   - 数字は "0"
+#   - 半角カタカナは "*"
+#   - その他の全角文字(マルチバイト文字)は "＊"
+#   - その他の半角英記号は "*"
+function custom_mask(str,    # local variables
+                     result, first_char, i, char, masked_part) {
+    if (length(str) <= 1) { return str; }
+    first_char = substr(str, 1, 1);
+    masked_part = "";
+    for (i = 2; i <= length(str); i++) {
+        char = substr(str, i, 1);
+        if (char ~ /[0-9]/) {
+            masked_part = masked_part "0";
+        } else if (char ~ /[ｦ-ﾟ]/) { # 半角カタカナを判定
+            masked_part = masked_part "*";
+        } else if (char ~ /[^\x01-\x7E]/) { # その他の全角文字を判定
+            masked_part = masked_part "＊";
+        } else { # 上記以外の半角英記号
+            masked_part = masked_part "*";
+        }
+    }
+    return first_char masked_part;
+}
+
+BEGIN {
+    # FPATはフィールドのパターンを定義する。
+    # 1. ダブルクォートで囲まれたフィールド: "[^"]*"
+    # 2. クォートなしのフィールド (カンマ以外が0文字以上): [^,]*
+    FPAT = "(\"[^\"]*\")|([^,]*)"
+    OFS = ","
+    EPOCH_DATE = "19700101"
+    QUOTED_EPOCH_DATE = "\"" EPOCH_DATE "\""
+
+    # マスク対象のカラムを高速に参照できるよう連想配列に格納
+    if (cols != "") {
+        split(cols, col_array, ",")
+        for (i in col_array) { mask_targets[col_array[i]] = 1 }
+    }
+    if (date_cols != "") {
+        split(date_cols, date_col_array, ",")
+        for (i in date_col_array) { date_mask_targets[date_col_array[i]] = 1 }
+    }
+}
+
+# 各行を処理
+{
+    # ヘッダー行またはフッター行の場合は、何もせずにそのまま出力
+    if (FNR <= header_lines || (total_lines > 0 && (total_lines - FNR) < footer_lines)) {
+        print $0
+        next
+    }
+
+    # 日付のマスク処理を優先
+    for (col_num in date_mask_targets) {
+        if (col_num > 0 && col_num <= NF) {
+            is_quoted = (substr($col_num, 1, 1) == "\"")
+            content = is_quoted ? substr($col_num, 2, length($col_num) - 2) : $col_num
+            if (length(content) > 0) {
+                $col_num = is_quoted ? QUOTED_EPOCH_DATE : EPOCH_DATE
+            }
+        }
+    }
+
+    # 次に通常のマスク処理
+    for (col_num in mask_targets) {
+        if (col_num in date_mask_targets) { continue }
+        if (col_num > 0 && col_num <= NF) {
+            is_quoted = (substr($col_num, 1, 1) == "\"")
+            content = is_quoted ? substr($col_num, 2, length($col_num) - 2) : $col_num
+            if (length(content) > 0) {
+                if (custom_mask_enabled == "true") {
+                    masked_content = custom_mask(content)
+                    $col_num = is_quoted ? "\"" masked_content "\"" : masked_content
+                } else {
+                    $col_num = replacement
+                }
+            }
+        }
+    }
+    print
+}
+EOF
 
 # --- メイン処理ループ ---
 for file in "$@"; do
@@ -97,110 +192,48 @@ for file in "$@"; do
         continue
     fi
     
-    TOTAL_LINES=$(wc -l < "$file")
+    TOTAL_LINES=0
+    # フッター処理のために総行数が必要な場合のみ計算する
+    if [ "${FOOTER_LINES}" -gt 0 ]; then
+        TOTAL_LINES=$(wc -l < "$file")
+    fi
 
-    # awkの実行時にロケールをC.UTF-8に設定し、文字コードの解釈を安定させる
-    LC_ALL=C.UTF-8 awk -v cols="${MASK_COLS}" \
-        -v date_cols="${DATE_MASK_COLS}" \
-        -v replacement="${REPLACEMENT_STRING}" \
-        -v custom_mask_enabled="${CUSTOM_MASK_ENABLED}" \
-        -v header_lines="${HEADER_LINES}" \
-        -v footer_lines="${FOOTER_LINES}" \
-        -v total_lines="${TOTAL_LINES}" \
-    '
-    # 高度なマスク処理を行うAWK関数:
-    # - 最初の1文字を表示する
-    # - 2文字目以降を以下のルールで置換する:
-    #   - 数字は "0"
-    #   - 半角カタカナは "*"
-    #   - その他の全角文字(マルチバイト文字)は "＊"
-    #   - その他の半角英記号は "*"
-    function custom_mask(str,    # local variables
-                         result, first_char, i, char, masked_part) {
-        if (length(str) <= 1) { return str; }
-        first_char = substr(str, 1, 1);
-        masked_part = "";
-        for (i = 2; i <= length(str); i++) {
-            char = substr(str, i, 1);
-            if (char ~ /[0-9]/) {
-                masked_part = masked_part "0";
-            } else if (char ~ /[ｦ-ﾟ]/) { # 半角カタカナを判定
-                masked_part = masked_part "*";
-            } else if (char ~ /[^\x01-\x7E]/) { # その他の全角文字を判定
-                masked_part = masked_part "＊";
-            } else { # 上記以外の半角英記号
-                masked_part = masked_part "*";
-            }
-        }
-        return first_char masked_part;
-    }
-
-    BEGIN {
-        # FPATはフィールドのパターンを定義する。
-        # 1. ダブルクォートで囲まれたフィールド: "[^"]*"
-        # 2. クォートなしのフィールド (カンマ以外が0文字以上): [^,]*
-        # [^,]+ から [^,]* に変更することで、空のフィールドを正しく認識する
-        FPAT = "(\"[^\"]*\")|([^,]*)"
-        OFS = ","
-        EPOCH_DATE = "19700101"
-        QUOTED_EPOCH_DATE = "\"" EPOCH_DATE "\""
-
-        # マスク対象のカラムを高速に参照できるよう連想配列に格納
-        if (cols != "") {
-            split(cols, col_array, ",")
-            for (i in col_array) { mask_targets[col_array[i]] = 1 }
-        }
-        if (date_cols != "") {
-            split(date_cols, date_col_array, ",")
-            for (i in date_col_array) { date_mask_targets[date_col_array[i]] = 1 }
-        }
-    }
-
-    # 各行を処理
-    {
-        # ヘッダー行またはフッター行の場合は、何もせずにそのまま出力
-        if (FNR <= header_lines || (total_lines - FNR) < footer_lines) {
-            print $0
-            next
-        }
-
-        # 日付のマスク処理を優先。指定された日付カラムをループ処理。
-        for (col_num in date_mask_targets) {
-            # この行にそのカラムが存在する場合のみ処理する
-            if (col_num > 0 && col_num <= NF) {
-                is_quoted = (substr($col_num, 1, 1) == "\"")
-                content = is_quoted ? substr($col_num, 2, length($col_num) - 2) : $col_num
-                
-                # フィールドの中身が空でなければマスクする
-                if (length(content) > 0) {
-                    $col_num = is_quoted ? QUOTED_EPOCH_DATE : EPOCH_DATE
-                }
-            }
-        }
-
-        # 次に通常のマスク処理。指定された一般マスクカラムをループ処理。
-        for (col_num in mask_targets) {
-            # 日付として既にマスク済みの場合はスキップ
-            if (col_num in date_mask_targets) {
-                continue
-            }
-            # この行にそのカラムが存在する場合のみ処理する
-            if (col_num > 0 && col_num <= NF) {
-                is_quoted = (substr($col_num, 1, 1) == "\"")
-                content = is_quoted ? substr($col_num, 2, length($col_num) - 2) : $col_num
-
-                # フィールドの中身が空でなければマスクする
-                if (length(content) > 0) {
-                    if (custom_mask_enabled == "true") {
-                        masked_content = custom_mask(content)
-                        $col_num = is_quoted ? "\"" masked_content "\"" : masked_content
-                    } else {
-                        $col_num = replacement
-                    }
-                }
-            }
-        }
-        print
-    }
-    ' "$file"
+    # awkコマンドの共通部分を配列で定義
+    AWK_COMMAND_ARRAY=(
+        LC_ALL=C.UTF-8 awk
+        -v "cols=${MASK_COLS}"
+        -v "date_cols=${DATE_MASK_COLS}"
+        -v "replacement=${REPLACEMENT_STRING}"
+        -v "custom_mask_enabled=${CUSTOM_MASK_ENABLED}"
+        -v "header_lines=${HEADER_LINES}"
+        -v "footer_lines=${FOOTER_LINES}"
+        -v "total_lines=${TOTAL_LINES}"
+        "$AWK_SCRIPT"
+    )
+    
+    if [ -n "${ENCODING}" ]; then
+        if ! command -v iconv &> /dev/null; then
+            echo "エラー: iconvコマンドが見つかりません。-Eオプションは使用できません。" >&2
+            exit 1
+        fi
+        # iconvで文字コードを変換してからawkに渡す
+        iconv -f "${ENCODING}" -t UTF-8 -- "$file" | "${AWK_COMMAND_ARRAY[@]}"
+    else
+        # 直接awkにファイルを渡す
+        "${AWK_COMMAND_ARRAY[@]}" "$file"
+    fi
 done
+```
+
+### 新しい使い方
+
+もしCSVファイルの文字コードが **Shift_JIS** である場合、以下のように `-E SHIFT_JIS` を付けて実行してください。
+
+```bash
+# Shift_JISのファイルの2列目をマスクする場合
+./mask_csv.sh -E SHIFT_JIS -c 2 -k your_file.csv
+```
+
+これにより、`"ｻﾄｳ ﾏﾕﾐ"` という文字列が、期待通り `"ｻ******"` のようにマスクされるはずです。
+
+お手数ですが、こちらの修正版で再度ご確認いただけますでしょうか。
