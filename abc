@@ -188,4 +188,3 @@ for file in "$@"; do
     }
     ' "$file"
 done
-
