@@ -1,45 +1,34 @@
 #!/bin/bash
 
 #================================================================
-# CSVマスク化ツール (改訂・修正版)
+# CSVマスク化ツール
 #
 # 説明:
 #   CSVファイル内の指定されたカラムをマスク化するツールです。
 #   ダブルクォーテーションで囲まれたフィールドも正しく処理します。
-#   マルチバイト文字(半角カナ等)の処理にgawk拡張機能を使用します。
-#
-# 依存関係:
-#   GNU Awk (gawk) が必要です。
 #
 # 使用方法:
-#  ./mask_csv.sh [options] [file1.csv ...]
+#   ./mask_csv.sh [options] [file1.csv ...]
 #
 # オプション:
 #   -c <列番号> : マスクするカラム番号をカンマ区切りで指定 (例: '2,4')。
 #   -d <列番号> : '19700101'でマスクする日付カラムをカンマ区切りで指定。
 #   -r <文字列> : -cで指定した列の置換文字列 (デフォルト: "MASKED")。-k使用時は無効。
-#   -k         : -cで指定した列にカスタムマスク処理(先頭1文字表示、文字種/幅維持)を有効化。
-#   -H <行数>  : マスク処理から除外するヘッダーの行数 (デフォルト: 0)。
-#   -F <行数>  : マスク処理から除外するフッターの行数 (デフォルト: 0)。
+#   -k           : -cで指定した列にカスタムマスク処理(先頭1文字表示、文字種/幅維持)を有効化。
+#   -H <行数>   : マスク処理から除外するヘッダーの行数 (デフォルト: 0)。
+#   -F <行数>   : マスク処理から除外するフッターの行数 (デフォルト: 0)。
 #   -E <文字コード> : 入力ファイルの文字コードを指定 (例: SHIFT_JIS)。
-#                   半角カナ等がマスクされない場合にお試しください。
-#   -h         : このヘルプメッセージを表示する。
+#                     半角カナ等がマスクされない場合にお試しください。
+#   -h           : このヘルプメッセージを表示する。
 #
 # 使用例:
 #   # Shift_JISのファイルを指定し、2列目をカスタムルールでマスク
-#  ./mask_csv.sh -E SHIFT_JIS -c 2 -k data.csv > masked_data.csv
+#   ./mask_csv.sh -E SHIFT_JIS -c 2 -k data.csv > masked_data.csv
 #
 #================================================================
 
-# --- 依存関係の確認 ---
-if ! command -v gawk &> /dev/null; then
-    echo "エラー: このスクリプトの実行にはGNU Awk (gawk) が必要です。" >&2
-    echo "gawkをインストールしてください (例: 'sudo apt-get install gawk' または 'sudo yum install gawk')。" >&2
-    exit 1
-fi
-
 # --- デフォルト設定 ---
-REPLACEMENT_STRING="\"MASKED\"" # デフォルトの置換文字列
+REPLACEMENT_STRING="\"MASKED\"" # デフォルトの置換文字列 (CSV形式のためクォート付き)
 CUSTOM_MASK_ENABLED=false
 MASK_COLS=""
 DATE_MASK_COLS=""
@@ -53,27 +42,46 @@ usage() {
     echo "  -c <列番号> : マスクするカラム番号をカンマ区切りで指定 (例: '2,4')。"
     echo "  -d <列番号> : '19700101'でマスクする日付カラムをカンマ区切りで指定。"
     echo "  -r <文字列> : -cで指定した列の置換文字列 (デフォルト: \"MASKED\")。-k使用時は無効。"
-    echo "  -k         : -cで指定した列にカスタムマスク処理(先頭1文字表示、文字種/幅維持)を有効化。"
-    echo "  -H <行数>  : マスク処理から除外するヘッダーの行数 (デフォルト: 0)。"
-    echo "  -F <行数>  : マスク処理から除外するフッターの行数 (デフォルト: 0)。"
+    echo "  -k           : -cで指定した列にカスタムマスク処理(先頭1文字表示、文字種/幅維持)を有効化。"
+    echo "  -H <行数>   : マスク処理から除外するヘッダーの行数 (デフォルト: 0)。"
+    echo "  -F <行数>   : マスク処理から除外するフッターの行数 (デフォルト: 0)。"
     echo "  -E <文字コード> : 入力ファイルの文字コードを指定 (例: SHIFT_JIS)。"
-    echo "                  半角カナ等がマスクされない場合にお試しください。"
-    echo "  -h         : このヘルプメッセージを表示する。"
+    echo "                     半角カナ等がマスクされない場合にお試しください。"
+    echo "  -h           : このヘルプメッセージを表示する。"
     exit 1
 }
 
 # --- オプション解析 ---
 while getopts "c:d:r:kH:F:E:h" opt; do
     case ${opt} in
-        c) MASK_COLS=${OPTARG} ;;
-        d) DATE_MASK_COLS=${OPTARG} ;;
-        r) REPLACEMENT_STRING="\"${OPTARG}\"" ;; # ユーザー指定文字列をクォート
-        k) CUSTOM_MASK_ENABLED=true ;;
-        H) HEADER_LINES=${OPTARG} ;;
-        F) FOOTER_LINES=${OPTARG} ;;
-        E) ENCODING=${OPTARG} ;;
-        h) usage ;;
-        \?) usage ;;
+        c)
+            MASK_COLS=${OPTARG}
+            ;;
+        d)
+            DATE_MASK_COLS=${OPTARG}
+            ;;
+        r)
+            # ユーザー指定の文字列をCSV形式のためダブルクォートで囲む
+            REPLACEMENT_STRING="\"${OPTARG}\""
+            ;;
+        k)
+            CUSTOM_MASK_ENABLED=true
+            ;;
+        H)
+            HEADER_LINES=${OPTARG}
+            ;;
+        F)
+            FOOTER_LINES=${OPTARG}
+            ;;
+        E)
+            ENCODING=${OPTARG}
+            ;;
+        h)
+            usage
+            ;;
+        \?)
+            usage
+            ;;
     esac
 done
 shift $((OPTIND - 1))
@@ -91,24 +99,28 @@ fi
 
 # --- awkスクリプトをヒアドキュメントで変数に格納 ---
 read -r -d '' AWK_SCRIPT << 'EOF'
-# 高度なマスク処理を行うAWK関数 (マルチバイト対応)
-function custom_mask(str,      # local variables
-                     first_char, i, char, masked_part, n, chars) {
-    n = split(str, chars, "");
-    if (n <= 1) { return str; }
-
-    first_char = chars[1]; # 配列の最初の要素を取得
+# 高度なマスク処理を行うAWK関数:
+# - 最初の1文字を表示する
+# - 2文字目以降を以下のルールで置換する:
+#   - 数字は "0"
+#   - 半角カタカナは "*"
+#   - その他の全角文字(マルチバイト文字)は "＊"
+#   - その他の半角英記号は "*"
+function custom_mask(str,    # local variables
+                     result, first_char, i, char, masked_part) {
+    if (length(str) <= 1) { return str; }
+    first_char = substr(str, 1, 1);
     masked_part = "";
-
-    for (i = 2; i <= n; i++) {
-        char = chars[i];
+    for (i = 2; i <= length(str); i++) {
+        char = substr(str, i, 1);
         if (char ~ /[0-9]/) {
             masked_part = masked_part "0";
-        } else if (char ~ /[ｦ-ﾟ]/) { # 半角カタカナ
+        # 半角カタカナを範囲指定ではなく、文字のリストで判定する
+        } else if (char ~ /[ｦｧｨｩｪｫｬｭｮｯｰｱｲｳｴｵｶｷｸｹｺｻｼｽｾｿﾀﾁﾂﾃﾄﾅﾆﾇﾈﾉﾊﾋﾌﾍﾎﾏﾐﾑﾒﾓﾔﾕﾖﾗﾘﾙﾚﾛﾜﾝﾞﾟ]/) {
             masked_part = masked_part "*";
-        } else if (char ~ /[^[:ascii:]]/) { # 全角文字 (非ASCII)
+        } else if (char ~ /[^\x01-\x7E]/) { # その他の全角文字を判定
             masked_part = masked_part "＊";
-        } else { # 半角英記号など
+        } else { # 上記以外の半角英記号
             masked_part = masked_part "*";
         }
     }
@@ -116,11 +128,15 @@ function custom_mask(str,      # local variables
 }
 
 BEGIN {
+    # FPATはフィールドのパターンを定義する。
+    # 1. ダブルクォートで囲まれたフィールド: "[^"]*"
+    # 2. クォートなしのフィールド (カンマ以外が0文字以上): [^,]*
     FPAT = "(\"[^\"]*\")|([^,]*)"
     OFS = ","
     EPOCH_DATE = "19700101"
     QUOTED_EPOCH_DATE = "\"" EPOCH_DATE "\""
 
+    # マスク対象のカラムを高速に参照できるよう連想配列に格納
     if (cols != "") {
         split(cols, col_array, ",")
         for (i in col_array) { mask_targets[col_array[i]] = 1 }
@@ -131,12 +147,15 @@ BEGIN {
     }
 }
 
+# 各行を処理
 {
+    # ヘッダー行またはフッター行の場合は、何もせずにそのまま出力
     if (FNR <= header_lines || (total_lines > 0 && (total_lines - FNR) < footer_lines)) {
         print $0
         next
     }
 
+    # 日付のマスク処理を優先
     for (col_num in date_mask_targets) {
         if (col_num > 0 && col_num <= NF) {
             is_quoted = (substr($col_num, 1, 1) == "\"")
@@ -147,6 +166,7 @@ BEGIN {
         }
     }
 
+    # 次に通常のマスク処理
     for (col_num in mask_targets) {
         if (col_num in date_mask_targets) { continue }
         if (col_num > 0 && col_num <= NF) {
@@ -174,12 +194,14 @@ for file in "$@"; do
     fi
     
     TOTAL_LINES=0
+    # フッター処理のために総行数が必要な場合のみ計算する
     if [ "${FOOTER_LINES}" -gt 0 ]; then
         TOTAL_LINES=$(wc -l < "$file")
     fi
 
-    AWK_COMMAND_ARRAY=(
-        gawk
+    # awkコマンドの共通部分を定義
+    AWK_COMMAND=(
+        awk
         -v "cols=${MASK_COLS}"
         -v "date_cols=${DATE_MASK_COLS}"
         -v "replacement=${REPLACEMENT_STRING}"
@@ -195,8 +217,11 @@ for file in "$@"; do
             echo "エラー: iconvコマンドが見つかりません。-Eオプションは使用できません。" >&2
             exit 1
         fi
-        iconv -f "${ENCODING}" -t UTF-8 -- "$file" | LC_ALL=C.UTF-8 "${AWK_COMMAND_ARRAY[@]}"
+        # iconvで文字コードを変換してからawkに渡す
+        iconv -f "${ENCODING}" -t UTF-8 -- "$file" | "${AWK_COMMAND[@]}"
     else
-        LC_ALL=C.UTF-8 "${AWK_COMMAND_ARRAY[@]}" "$file"
+        # 直接awkにファイルを渡す
+        "${AWK_COMMAND[@]}" "$file"
     fi
 done
+
