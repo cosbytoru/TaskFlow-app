@@ -1,23 +1,335 @@
+#!/bin/bash
 
-MDM_AP_MAP_FS0319o0317GH0="0028"
-MDM_AP_MAP_FS0319o0317GI0="0028"
-MDM_AP_MAP_FS0319o0317GJ0="0028"
-MDM_AP_MAP_FS0319o0317GK0="0028"
-MDM_AP_MAP_FS0319o0317GL0="0028"
-MDM_AP_MAP_FS0319o0317GM0="0028"
-MDM_AP_MAP_FS0319o0317GR0="0030"
-MDM_AP_MAP_FS0319o0317GS0="0030"
+# --- 設定 ---
+TARGET_SCRIPT="./UDMdm_Receive_Common.sh"
+GREEN='\033[0;32m'
+RED='\033[0;31m'
+NC='\033[0m' # No Color
+YELLOW='\033[0;33m'
 
+# --- グローバル変数 ---
+TEST_COUNTER=0
+PASS_COUNTER=0
+CURRENT_TEST_NAME=""
 
-MDM_AP_PASSWORD_SENDER_0315="dummy0315"
-MDM_AP_PASSWORD_SENDER_0028="dummy0028"
-MDM_AP_PASSWORD_SENDER_0030="dummy0030"
+# ★★★ ここを修正しました ★★★
+declare -A TEST_DESCRIPTIONS
+TEST_DESCRIPTIONS=(
+    ["test_success_fallback_logic"]="正常系: **原則のルール（ファイル名からIDを抽出）**で処理が成功することを確認します。"
+    ["test_success_with_multiple_mixed_files"]="正常系: *出力先がデータHUBになっており、システムIDがわからないため、個別Configで指定したファイル**と、**原則ルールのファイル**が混在していても全て成功することを確認します。"
+    ["test_failure_wrong_password"]="異常系: 不正なパスワードが設定されている場合に、復号化で失敗し、スクリプトが異常終了(200)することを確認します。"
+    ["test_remote_file_not_found_warn"]="異常系: 通常のファイルがリモートに存在しない場合に、スクリプトが警告終了(100)することを確認します。"
+    ["test_invalid_arg_count"]="異常系: 引数の数が不正な場合に、スクリプトが異常終了(200)することを確認します。"
+    ["test_no_remote_file_normal_exit"]="正常系(特別パターン): **差分なしを許容するIDのファイル**がリモートにない場合、正常終了(0)し、ローカルに空ファイルが作成されることを確認します。"
+)
 
+# ==============================================================================
+#  モックコマンドのセットアップ (変更なし)
+# ==============================================================================
+create_mock_commands() {
+    # ... (内容は変更なし) ...
+    local mock_dir="$1"
+    cat > "${mock_dir}/ssh" << EOF
+#!/bin/bash
+REMOTE_CMD="\${@:2}"; eval \${REMOTE_CMD}
+EOF
+    cat > "${mock_dir}/sftp" << EOF
+#!/bin/bash
+if [ "\${SFTP_BEHAVIOR}" = "always_fail" ]; then exit 1; fi
+while read -r cmd arg1; do
+    case "\$cmd" in
+        lcd) LOCAL_DIR="\$arg1" ;;
+        get) REMOTE_FILE_PATH="\$arg1" ;;
+    esac
+done
+if [ -n "\$LOCAL_DIR" ] && [ -n "\$REMOTE_FILE_PATH" ] && [ -f "\$REMOTE_FILE_PATH" ]; then
+    cp "\$REMOTE_FILE_PATH" "\$LOCAL_DIR/"
+fi
+EOF
+    cat > "${mock_dir}/sha256sum" << EOF
+#!/bin/bash
+if [ -f "\$1" ]; then echo "DUMMY_SUCCESS_HASH_VALUE  \$1"; else echo ""; fi
+EOF
+    cat > "${mock_dir}/7z" << EOF
+#!/bin/bash
+IFS="," read -ra EXPECTED_ARRAY <<< "\$EXPECTED_PASSWORDS"
+CALL_COUNT_FILE="${TEST_ROOT}/7z_call_count"
+COUNT=\$(cat "\$CALL_COUNT_FILE" 2>/dev/null || echo 0)
+EXPECTED_PWD=\${EXPECTED_ARRAY[\$COUNT]}
+PASSWORD=""; OUT_DIR=""; ZIP_FILE=""
+for arg in "\$@"; do
+    if [[ "\$arg" == -p* ]]; then PASSWORD="\${arg#-p}";
+    elif [[ "\$arg" == -o* ]]; then OUT_DIR="\${arg#-o}";
+    elif [ -f "\$arg" ]; then ZIP_FILE="\$arg"; fi
+done
+if [ -n "\$EXPECTED_PWD" ] && [ "\$PASSWORD" != "\$EXPECTED_PWD" ]; then exit 2; fi
+if [ -n "\$OUT_DIR" ] && [ -n "\$ZIP_FILE" ]; then
+    mkdir -p "\$OUT_DIR"; touch "\${OUT_DIR}/\$(basename "\${ZIP_FILE}")";
+    echo \$((COUNT + 1)) > "\$CALL_COUNT_FILE"
+    exit 0
+else
+    exit 1;
+fi
+EOF
+    cat > "${mock_dir}/date" << EOF
+#!/bin/bash
+if [ "\$1" = "+%Y%m%d" ]; then echo "20250729";
+else /bin/date "\$@"; fi
+EOF
+    chmod +x "${mock_dir}"/*
+}
 
-MDM_AP_PASSWORD_RECEIVER_0315="dummy0315"
-MDM_AP_PASSWORD_RECEIVER_0316="dummy0316"
-MDM_AP_PASSWORD_RECEIVER_0319="dummy0319"
-MDM_AP_PASSWORD_RECEIVER_0006="dummy0006"
+# ==============================================================================
+#  テストの実行と検証（アサーション） (変更なし)
+# ==============================================================================
+assert_equals() {
+    # ... (内容は変更なし) ...
+    local expected="$1" actual="$2" message="$3"
+    TEST_COUNTER=$((TEST_COUNTER + 1))
+    if [ "$expected" == "$actual" ]; then
+        echo -e "  ${GREEN}PASS:${NC} [${CURRENT_TEST_NAME}] ${message}"; PASS_COUNTER=$((PASS_COUNTER + 1))
+    else
+        echo -e "  ${RED}FAIL:${NC} [${CURRENT_TEST_NAME}] ${message}"; echo -e "    Expected: '${expected}'\n    Actual:   '${actual}'"
+        [ ! -z "$ASSERT_OUTPUT" ] && echo -e "    --- Script Output ---\n$ASSERT_OUTPUT\n    ---------------------"
+    fi
+}
+assert_file_exists() {
+    local file_path="$1" message="$2"
+    assert_equals "true" "$(test -f "${file_path}" && echo true)" "${message}"
+}
+assert_file_not_exists() {
+    local file_path="$1" message="$2"
+    local actual="false"
+    if [ -f "${file_path}" ]; then
+        actual="true"
+    fi
+    assert_equals "false" "${actual}" "${message}"
+}
+assert_file_is_empty() {
+    local file_path="$1" message="$2"
+    assert_equals "true" "$(test ! -s "${file_path}" && echo true)" "${message}"
+}
+assert_output_contains() {
+    local expected_text="$1" message="$2"
+    assert_equals "1" "$(echo "${ASSERT_OUTPUT}" | grep -c "${expected_text}")" "${message}"
+}
+run_test() {
+    # ... (内容は変更なし) ...
+    local TEST_ROOT=$(mktemp -d ./test_temp.XXXXXX)
+    TEST_ROOT=$(readlink -f "${TEST_ROOT}")
+    local MOCK_BIN_DIR="${TEST_ROOT}/bin"
+    export RECV_DIR="${TEST_ROOT}/recv"
+    export BACKUP_DIR="${TEST_ROOT}/backup"
+    export DATA_HUB_RECV="${TEST_ROOT}/remote/data_hub"
+    export CONF_BASE_PATH="${TEST_ROOT}/conf"
+    mkdir -p "${MOCK_BIN_DIR}" "${RECV_DIR}" "${BACKUP_DIR}" "${DATA_HUB_RECV}" "${CONF_BASE_PATH}"
+    export ORIGINAL_PATH=$PATH
+    export PATH="${MOCK_BIN_DIR}:${PATH}"
+    create_mock_commands "${MOCK_BIN_DIR}"
+    cat > "${CONF_BASE_PATH}/UDMdmCommon.conf" << EOF
+MDM_EXIT_NORMAL=0; MDM_EXIT_WARN=100; MDM_EXIT_ERROR=200;
+DATA_HUB_USER="testuser"; DATA_HUB_HOST="remotehost"; SEVEN_ZIP_CMD="7z";
+CIPHER_TYPE="aes256"; RETRY_INTERVAL=1
+EOF
+    type setup_test_case &>/dev/null && setup_test_case
+    ASSERT_OUTPUT=$(${TARGET_SCRIPT} ${SCRIPT_ARGS} 2>&1)
+    EXIT_CODE=$?
+    type run_assertions &>/dev/null && run_assertions
+    export PATH=$ORIGINAL_PATH
+    rm -rf "${TEST_ROOT}"
+    unset EXPECTED_PASSWORDS SCRIPT_ARGS ASSERT_OUTPUT EXIT_CODE
+}
+
+# ==============================================================================
+#  テストケース定義 (変更なし)
+# ==============================================================================
+test_success_fallback_logic() {
+    # ... (内容は変更なし) ...
+    echo "--- Running: 正常系テスト (単一ファイル・代替手段) ---"
+    setup_test_case() {
+        cat > "${CONF_BASE_PATH}/UDMdmIFFileName.conf" << EOF
+MDM_AP_DATA_DIR_RECV_SYS01="\${RECV_DIR}"; MDM_AP_BACKUP_RECV_SYS01="\${BACKUP_DIR}";
+MDM_AP_FILE_NAME_RECV_SYS01="ID01SENDER"; MDM_AP_PASSWORD_SENDER_01SE="TestPassword123";
+EOF
+        REMOTE_FILENAME="ID01SENDER572903"
+        touch "${DATA_HUB_RECV}/${REMOTE_FILENAME}"
+        export EXPECTED_PASSWORDS="TestPassword123"
+        SCRIPT_ARGS="SYS01 03 20250729"
+    }
+    run_assertions() {
+        assert_equals 0 ${EXIT_CODE} "スクリプトは正常終了(0)すること"
+        assert_file_exists "${BACKUP_DIR}/${REMOTE_FILENAME}" "バックアップファイルが作成されること"
+        assert_file_exists "${RECV_DIR}/${REMOTE_FILENAME}" "展開後のファイルが配置されること"
+    }
+    run_test
+}
+test_success_with_multiple_mixed_files() {
+    # ... (内容は変更なし) ...
+    echo "--- Running: 正常系テスト (複数ファイル混在) ---"
+    setup_test_case() {
+        cat > "${CONF_BASE_PATH}/UDMdmIFFileName.conf" << EOF
+MDM_AP_DATA_DIR_RECV_SYS01="\${RECV_DIR}"; MDM_AP_BACKUP_RECV_SYS01="\${BACKUP_DIR}";
+MDM_AP_FILE_NAME_RECV_SYS01="FS0319o0317GH0,ID01SENDER,FS0319o0317GR0";
+MDM_AP_MAP_FS0319o0317GH0=1117; MDM_AP_MAP_FS0319o0317GR0=0030;
+MDM_AP_PASSWORD_SENDER_1117="PassForGH0"; MDM_AP_PASSWORD_SENDER_01SE="PassForID01";
+MDM_AP_PASSWORD_SENDER_0030="PassForGR0";
+EOF
+        export EXPECTED_PASSWORDS="PassForGH0,PassForID01,PassForGR0"
+        REMOTE_FILENAME1="FS0319o0317GH0572903"
+        REMOTE_FILENAME2="ID01SENDER572903"
+        REMOTE_FILENAME3="FS0319o0317GR0572903"
+        touch "${DATA_HUB_RECV}/${REMOTE_FILENAME1}" "${DATA_HUB_RECV}/${REMOTE_FILENAME2}" "${DATA_HUB_RECV}/${REMOTE_FILENAME3}"
+        SCRIPT_ARGS="SYS01 03 20250729"
+    }
+    run_assertions() {
+        assert_equals 0 ${EXIT_CODE} "スクリプトは正常終了(0)すること"
+        assert_file_exists "${BACKUP_DIR}/${REMOTE_FILENAME1}" "ファイル1(マッピング)がバックアップされること"
+        assert_file_exists "${BACKUP_DIR}/${REMOTE_FILENAME2}" "ファイル2(代替手段)がバックアップされること"
+        assert_file_exists "${BACKUP_DIR}/${REMOTE_FILENAME3}" "ファイル3(マッピング)がバックアップされること"
+    }
+    run_test
+}
+test_failure_wrong_password() {
+    # ... (内容は変更なし) ...
+    echo "--- Running: 異常系テスト (パスワード不正) ---"
+    setup_test_case() {
+        cat > "${CONF_BASE_PATH}/UDMdmIFFileName.conf" << EOF
+MDM_AP_DATA_DIR_RECV_SYS01="\${RECV_DIR}"; MDM_AP_BACKUP_RECV_SYS01="\${BACKUP_DIR}";
+MDM_AP_FILE_NAME_RECV_SYS01="FS0319o0317GH0";
+MDM_AP_MAP_FS0319o0317GH0=1117; MDM_AP_PASSWORD_SENDER_1117="WrongPassword";
+EOF
+        export EXPECTED_PASSWORDS="CorrectPassword"
+        REMOTE_FILENAME="FS0319o0317GH0572903"
+        touch "${DATA_HUB_RECV}/${REMOTE_FILENAME}"
+        SCRIPT_ARGS="SYS01 03 20250729"
+    }
+    run_assertions() {
+        assert_equals 200 ${EXIT_CODE} "スクリプトは異常終了(200)すること"
+        assert_output_contains "ファイルの復号化・圧縮解凍に失敗しました" "復号化失敗メッセージが出力されること"
+    }
+    run_test
+}
+test_remote_file_not_found_warn() {
+    # ... (内容は変更なし) ...
+    echo "--- Running: リモートファイル欠損テスト (警告終了) ---"
+    setup_test_case() {
+        cat > "${CONF_BASE_PATH}/UDMdmIFFileName.conf" << EOF
+MDM_AP_DATA_DIR_RECV_SYS01="\${RECV_DIR}"; MDM_AP_BACKUP_RECV_SYS01="\${BACKUP_DIR}";
+MDM_AP_FILE_NAME_RECV_SYS01="ID01SENDER";
+MDM_AP_PASSWORD_SENDER_01SE="anypass";
+EOF
+        SCRIPT_ARGS="SYS01 03 20250729"
+    }
+    run_assertions() {
+        assert_equals 100 ${EXIT_CODE} "スクリプトは警告終了(100)すること"
+        assert_output_contains "ファイルが存在しません" "ファイル欠損メッセージが出力されること"
+    }
+    run_test
+}
+test_invalid_arg_count() {
+    # ... (内容は変更なし) ...
+    echo "--- Running: 引数不正テスト ---"
+    setup_test_case() {
+        SCRIPT_ARGS="SYS01"
+        ASSERT_OUTPUT=$(${TARGET_SCRIPT} ${SCRIPT_ARGS} 2>&1); EXIT_CODE=$?
+        assert_equals 200 ${EXIT_CODE} "引数1つは異常終了(200)すること"
+        assert_output_contains "パラメータ数不正" "パラメータ数不正メッセージが出力されること"
+
+        SCRIPT_ARGS="SYS01 01 20250101 EXTRA_ARG"
+        ASSERT_OUTPUT=$(${TARGET_SCRIPT} ${SCRIPT_ARGS} 2>&1); EXIT_CODE=$?
+        assert_equals 200 ${EXIT_CODE} "引数4つは異常終了(200)すること"
+        assert_output_contains "パラメータ数不正" "パラメータ数不正メッセージが出力されること"
+    }
+    run_assertions() {
+        : # 内部で検証済み
+    }
+    run_test
+}
+test_no_remote_file_normal_exit() {
+    # ... (内容は変更なし) ...
+    echo "--- Running: リモートファイル欠損テスト (正常終了パターン) ---"
+    setup_test_case() {
+        cat >> "${CONF_BASE_PATH}/UDMdmCommon.conf" << EOF
+MDM_AP_NO_FILE_NORMAL_IDS="0028,0030"
+EOF
+        cat > "${CONF_BASE_PATH}/UDMdmIFFileName.conf" << EOF
+MDM_AP_DATA_DIR_RECV_SYS01="\${RECV_DIR}"; MDM_AP_BACKUP_RECV_SYS01="\${BACKUP_DIR}";
+MDM_AP_FILE_NAME_RECV_SYS01="FS0319o0314G00";
+MDM_AP_MAP_FS0319o0314G00=0028;
+MDM_AP_PASSWORD_SENDER_0028="anypass";
+EOF
+        REMOTE_FILENAME="FS0319o0314G00572903"
+        SCRIPT_ARGS="SYS01 03 20250729"
+    }
+    run_assertions() {
+        assert_equals 0 ${EXIT_CODE} "スクリプトは正常終了(0)すること"
+        assert_file_exists "${RECV_DIR}/${REMOTE_FILENAME}" "ローカルに空ファイルが作成されること"
+        assert_file_is_empty "${RECV_DIR}/${REMOTE_FILENAME}" "作成されたファイルは0バイトであること"
+        assert_file_not_exists "${BACKUP_DIR}/${REMOTE_FILENAME}" "バックアップは作成されないこと"
+    }
+    run_test
+}
+
+# ==============================================================================
+#  メイン実行部 (変更なし)
+# ==============================================================================
+main() {
+    echo "===== テスト開始 ====="
+    if [ ! -f "${TARGET_SCRIPT}" ]; then
+        echo -e "${RED}エラー: テスト対象のスクリプト ${TARGET_SCRIPT} が見つかりません。${NC}"
+        exit 1
+    fi
+
+    local tests_to_run
+    if [ $# -gt 0 ]; then
+        tests_to_run="$@"
+    else
+        tests_to_run=$(declare -F | awk '{print $3}' | grep "^test_")
+    fi
+
+    declare -A TEST_RESULTS
+
+    for test_name in $tests_to_run; do
+        CURRENT_TEST_NAME="$test_name"
+        
+        local before_pass_count=$PASS_COUNTER
+        local before_test_count=$TEST_COUNTER
+
+        $test_name
+
+        local after_pass_count=$PASS_COUNTER
+        local after_test_count=$TEST_COUNTER
+
+        local assertions_in_test=$((after_test_count - before_test_count))
+        local passes_in_test=$((after_pass_count - before_pass_count))
+
+        if [ $assertions_in_test -eq $passes_in_test ] && [ $assertions_in_test -gt 0 ]; then
+            TEST_RESULTS[$test_name]="PASS"
+        else
+            TEST_RESULTS[$test_name]="FAIL"
+        fi
+    done
+
+    echo "===== テスト結果サマリー ====="
+    for test_name in $tests_to_run; do
+        local status=${TEST_RESULTS[$test_name]}
+        local description=${TEST_DESCRIPTIONS[$test_name]}
+        
+        if [ "$status" == "PASS" ]; then
+            echo -e "[${GREEN}PASS${NC}] ${YELLOW}${test_name}${NC}"
+        else
+            echo -e "[${RED}FAIL${NC}] ${YELLOW}${test_name}${NC}"
+        fi
+        echo -e "      ${description}"
+        echo
+    done
+    
+    echo "------------------------------"
+    echo "総合結果: ${PASS_COUNTER} / ${TEST_COUNTER} 件のアサーションが成功しました。"
+    if [ "${PASS_COUNTER}" -ne "${TEST_COUNTER}" ]; then exit 1; fi
+}
+
+main "$@"
 
 
 #!/bin/bash
@@ -26,23 +338,23 @@ MDM_AP_PASSWORD_RECEIVER_0006="dummy0006"
 #
 # シェル名称：UDMdm_Receive_Common.sh
 # シェル和名：受信機能
-# 処理概要  ：sFTP(get)方式でデータHUBに置かれたファイルを取得、および
-#           取得したファイルの圧縮解凍および暗号化解除、バックアップを行う。
+# 処理概要  ：sFTP(get)方式でデータHUBに置かれたファイルを取得、および
+#           取得したファイルの圧縮解凍および暗号化解除、バックアップを行う。
 #
-#   引数  :
-#           $1 マスタ番号（3桁の数値）
-#           $2 作成通番
-#           $3 取込日付（YYYYMMDD形式, 省略可）
-#           ※$3 引数なしの場合は、本日日付を自動で設定する。
+#   引数  :
+#           $1 マスタ番号（3桁の数値）
+#           $2 作成通番
+#           $3 取込日付（YYYYMMDD形式, 省略可）
+#           ※$3 引数なしの場合は、本日日付を自動で設定する。
 #
-#   戻り値:
-#           0   (正常終了)
-#           100 (警告終了)
-#           200 (異常終了)
+#   戻り値:
+#           0   (正常終了)
+#           100 (警告終了)
+#           200 (異常終了)
 #
-#   特記事項:
-#           [改修履歴]
-#           YYYY/MM/DD 担当者名 : ファイル識別子ごとにパスワードを動的に取得するよう改修
+#   特記事項:
+#           [改修履歴]
+#           YYYY/MM/DD 担当者名 : ファイル識別子ごとにパスワードを動的に取得するよう改修
 #
 ################################################################################
 
@@ -79,7 +391,7 @@ elif [ $# = 3 ]
 then
     CREATE_NO=$2
     INPUTDATE=$3
-    if [ ${#INPUTDATE} -ne 8 ]; 
+    if [ ${#INPUTDATE} -ne 8 ];
     then
         # パラメータ桁数不正
         echo "パラメータ桁数不正"
@@ -110,8 +422,8 @@ FILEIDENTS=${!PARAM_NAME}
 
 ################################################################################
 # 4.受信処理
-#   ※以降の処理はファイル識別子の定義情報の数分繰り返す
-#   　途中で異常が発生した場合は処理を中断して異常終了とする（繰り返しの途中でも残りの処理は行わない）
+#   ※以降の処理はファイル識別子の定義情報の数分繰り返す
+#   　途中で異常が発生した場合は処理を中断して異常終了とする（繰り返しの途中でも残りの処理は行わない）
 ################################################################################
 
 # ファイル識別子の定義情報をカンマ区切り→半角スペース区切りに変更
@@ -122,17 +434,17 @@ for FILEIDE in ${FILEIDENTS[@]} ; do
 
     ############################################################################
     # パスワードの動的取得
-    #   ファイル識別子全体をキーとして、設定ファイルのマッピング定義を元に
-    #   使用する送信システムIDを決定する。
+    #   ファイル識別子全体をキーとして、設定ファイルのマッピング定義を元に
+    #   使用する送信システムIDを決定する。
     ############################################################################
- 
+
     # ファイル識別子全体を元に、マッピング定義の変数名を動的に生成
     MAP_PARAM_NAME="MDM_AP_MAP_"${FILEIDE}
- 
+
     # 間接参照で、キーに対応するシステムIDを取得
     # (設定ファイルにマッピング定義があれば、SENDER_IDに値が設定される)
     SENDER_ID=${!MAP_PARAM_NAME}
- 
+
     # マッピング定義が存在しなかった場合のフォールバック処理
     if [ -z "${SENDER_ID}" ]; then
         # マッピング定義がなければ、従来通りファイル識別子の3文字目から4桁をシステムIDとして使用する
@@ -153,14 +465,14 @@ for FILEIDE in ${FILEIDENTS[@]} ; do
     fi
 
     ############################################################################
-    # 4.1.ファイル名の生成： 
-    #   (ファイル識別子) + YMDD
+    # 4.1.ファイル名の生成：
+    #   (ファイル識別子) + YMDD
     #
-    #   ・Y ： INPUTDATE のうち 4桁目 の値（YYYYの末尾1桁）
-    #   ・M ： INPUTDATE のうち 5～6桁目 の値(MM) について、
-    #            値を 10進数 → 16進数 に変換して設定
-    #            （※1～9月は数字、10月→A、11月→B、12月→C）
-    #   ・DD： INPUTDATE のうち 7～8桁目 の値(DD)
+    #   ・Y ： INPUTDATE のうち 4桁目 の値（YYYYの末尾1桁）
+    #   ・M ： INPUTDATE のうち 5～6桁目 の値(MM) について、
+    #            値を 10進数 → 16進数 に変換して設定
+    #            （※1～9月は数字、10月→A、11月→B、12月→C）
+    #   ・DD： INPUTDATE のうち 7～8桁目 の値(DD)
     ############################################################################
     # YMDD値の取得
     STR1=`echo ${INPUTDATE} | cut -c 4`
@@ -176,19 +488,43 @@ for FILEIDE in ${FILEIDENTS[@]} ; do
     ############################################################################
     # 4.2.受信対象のファイルのハッシュ値取得
     ############################################################################
-    # ハッシュ値の取得（SSH）
-    INPUTFILE_HASH=`ssh ${DATA_HUB_USER}@${DATA_HUB_HOST} sha256sum ${INPUTFILE_PATH} | cut -d " " -f 1`
-    if [ -z ${INPUTFILE_HASH} ]
-    then
-        # 取得できなかった場合は警告終了とする
-        echo "ファイルが存在しません。受信ファイル名："${INPUTFILE}
-        echo "受信機能 警告終了"
-        exit ${MDM_EXIT_WARN}
+    # ハッシュ値の取得（SSH）。ファイルが存在しない場合のエラーは抑制する。
+    INPUTFILE_HASH=`ssh ${DATA_HUB_USER}@${DATA_HUB_HOST} sha256sum ${INPUTFILE_PATH} 2>/dev/null | cut -d " " -f 1`
+
+    if [ -z "${INPUTFILE_HASH}" ]; then
+        # ハッシュ値が取得できなかった（=ファイルが存在しない）場合の処理
+
+        # 設定ファイルから読み込んだカンマ区切りのIDリストを、スクリプト内でスペース区切りに変換
+        local_id_list="${MDM_AP_NO_FILE_NORMAL_IDS//,/ }"
+
+        # スペース区切りに変換したリストを使って、IDが含まれるか判定
+        if [[ " ${local_id_list} " =~ " ${SENDER_ID} " ]]; then
+            # リストに含まれるIDの場合は、差分なしとして正常処理を行う
+            echo "ファイルが存在しません（差分なし）。受信ファイル名：${INPUTFILE}"
+            echo "ローカルに0件ファイルを作成します。パス：${RECV_DIR}/${INPUTFILE}"
+
+            # ローカルに0件ファイルを作成
+            touch "${RECV_DIR}/${INPUTFILE}"
+            if [ $? -ne 0 ]; then
+                # touchに失敗した場合は異常終了
+                echo "0件ファイルの作成に失敗しました。"
+                echo "受信機能 異常終了"
+                exit ${MDM_EXIT_ERROR}
+            fi
+
+            # このファイル識別子の処理はここで終了し、次のループへ進む
+            continue
+        else
+            # それ以外のファイル識別子の場合は、従来通り警告終了
+            echo "ファイルが存在しません。受信ファイル名："${INPUTFILE}
+            echo "受信機能 警告終了"
+            exit ${MDM_EXIT_WARN}
+        fi
     fi
 
     ############################################################################
     # 4.3.ファイル受信（sFTP）
-    #   ※受信後のハッシュ値が一致しない場合は失敗とし、3回までリトライする
+    #   ※受信後のハッシュ値が一致しない場合は失敗とし、3回までリトライする
     ############################################################################
     RETRY_COUNT=3
     ERRORFLAG=1
@@ -196,8 +532,8 @@ for FILEIDE in ${FILEIDENTS[@]} ; do
     do
         # ファイル受信
 sftp ${DATA_HUB_USER}@${DATA_HUB_HOST} << EOF
-          lcd ${RECV_DIR}
-          get ${INPUTFILE_PATH}
+        lcd ${RECV_DIR}
+        get ${INPUTFILE_PATH}
 EOF
 
         # 受信したファイルのハッシュ値を取得
@@ -266,4 +602,3 @@ echo "受信機能 処理終了"
 
 # 実行結果（返却値）
 exit ${MDM_EXIT_NORMAL}
-
