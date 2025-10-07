@@ -1,18 +1,9 @@
-suzuki_test]$ ./filter_csv_debug.sh -c 22 -f filter_list.txt test_small.csv > /dev/null
---- DEBUG INFO ---
-File: test_small.csv
-Total lines read in file: 101
-Content of lines[1]: ["0","TOP","232","20250916","0","00000","000","000",,,,]
-After parsing lines[1]:
-NF (Number of Fields): 1
-  $ 1 = ["0","TOP","232","20250916","0","00000","000","000",,,,]
---- END DEBUG INFO ---
-エラー: 1行目がTOPレコードではありません。ファイル:,test_small.csv
-
 #!/bin/bash
 
 #================================================================
-# CSVフィルタリングツール (デバッグ版)
+# CSVフィルタリングツール (最終解決版)
+#
+# 依存関係: gawk (GNU Awk) - 必須
 #================================================================
 
 # --- デフォルト設定 ---
@@ -50,7 +41,8 @@ for file in "$@"; do
     if [ ! -f "$file" ]; then echo "警告: ファイルなし: $file" >&2; continue; fi
     if [ $(wc -l < "$file") -lt 2 ]; then echo "警告: 行数不足: $file" >&2; continue; fi
 
-    gawk -v col="${COLUMN}" \
+    # 【重要】LC_ALL=C を付けて gawk を実行し、ロケールの影響を完全に排除する
+    LC_ALL=C gawk -v col="${COLUMN}" \
          -v patterns="${MATCH_STRINGS}" \
          -v listfile="${LIST_FILE}" \
     '
@@ -68,20 +60,7 @@ for file in "$@"; do
     }
     { lines[FNR] = $0 }
     END {
-        # --- ここからデバッグコード ---
-        print "--- DEBUG INFO ---" > "/dev/stderr"
-        print "File: " FILENAME > "/dev/stderr"
-        print "Total lines read in file: " FNR > "/dev/stderr"
-        print "Content of lines[1]: [" lines[1] "]" > "/dev/stderr"
         $0 = lines[1]
-        print "After parsing lines[1]:" > "/dev/stderr"
-        print "NF (Number of Fields): " NF > "/dev/stderr"
-        for (i=1; i<=NF; i++) {
-            print "  $ " i " = [" $i "]" > "/dev/stderr"
-        }
-        print "--- END DEBUG INFO ---" > "/dev/stderr"
-        # --- ここまでデバッグコード ---
-
         if ($2 != "TOP") {
             print "エラー: 1行目がTOPレコードではありません。ファイル:", FILENAME > "/dev/stderr"
             exit 1
@@ -111,8 +90,6 @@ for file in "$@"; do
     }
     ' "$file"
 done
-
-
 
 
 
