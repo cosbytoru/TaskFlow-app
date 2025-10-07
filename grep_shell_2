@@ -1,5 +1,4 @@
-./filter_csv_2.sh  -c 22 -f filter_list.txt 509_1_CustomerMaster_All_20250916.csv > grep_509_1_CustomerMaster_All_20250916.
-エラー: 1行目がTOPレコードではありません。ファイル:,509_1_CustomerMaster_All_20250916.csv
+(head -n 100 509_1_CustomerMaster_All_20250916.csv; tail -n 1 509_1_CustomerMaster_All_20250916.csv) > test_small.csv
 
 
 #!/bin/bash
