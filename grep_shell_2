@@ -1,13 +1,9 @@
-(head -n 100 509_1_CustomerMaster_All_20250916.csv; tail -n 1 509_1_CustomerMaster_All_20250916.csv) > test_small.csv
 
 
 #!/bin/bash
 
 #================================================================
-# CSVフィルタリングツール (gawk指定 最終版)
-#
-# 依存関係:
-#   gawk (GNU Awk) - 必須
+# CSVフィルタリングツール (デバッグ版)
 #================================================================
 
 # --- デフォルト設定 ---
@@ -18,10 +14,6 @@ LIST_FILE=""
 # --- ヘルプメッセージ表示関数 ---
 usage() {
     echo "使用方法: $0 -c <列番号> {-s <文字列> | -f <リストファイル>} [file1.csv ...]"
-    echo "  -c <列番号>        : フィルタリング対象のカラム番号。必須。"
-    echo "  -s <文字列>        : 抽出する文字列をカンマ区切りで指定 (例: \"G111,G3333\")。"
-    echo "  -f <リストファイル> : 抽出する文字列を1行1件で記述したファイル。"
-    echo "  -h                 : このヘルプメッセージを表示する。"
     exit 1
 }
 
@@ -38,32 +30,17 @@ done
 shift $((OPTIND - 1))
 
 # --- 必須引数の検証 ---
-if [ -z "${COLUMN}" ]; then
-    echo "エラー: -c は必須オプションです。" >&2; usage;
-fi
-if [ -n "${MATCH_STRINGS}" ] && [ -n "${LIST_FILE}" ]; then
-    echo "エラー: -s と -f オプションは同時に指定できません。" >&2; usage;
-fi
-if [ -z "${MATCH_STRINGS}" ] && [ -z "${LIST_FILE}" ]; then
-    echo "エラー: -s または -f のどちらか一方を指定してください。" >&2; usage;
-fi
-if [ -n "${LIST_FILE}" ] && [ ! -f "${LIST_FILE}" ]; then
-    echo "エラー: リストファイルが見つかりません: ${LIST_FILE}" >&2; exit 1;
-fi
-if [ $# -eq 0 ]; then
-    echo "エラー: 処理対象のファイルが指定されていません。" >&2; usage;
-fi
+if [ -z "${COLUMN}" ]; then echo "エラー: -c は必須" >&2; usage; fi
+if [ -n "${MATCH_STRINGS}" ] && [ -n "${LIST_FILE}" ]; then echo "エラー: -s と -f は同時指定不可" >&2; usage; fi
+if [ -z "${MATCH_STRINGS}" ] && [ -z "${LIST_FILE}" ]; then echo "エラー: -s または -f が必須" >&2; usage; fi
+if [ -n "${LIST_FILE}" ] && [ ! -f "${LIST_FILE}" ]; then echo "エラー: リストファイルなし: ${LIST_FILE}" >&2; exit 1; fi
+if [ $# -eq 0 ]; then echo "エラー: 対象ファイルなし" >&2; usage; fi
 
 # --- メイン処理ループ ---
 for file in "$@"; do
-    if [ ! -f "$file" ]; then
-        echo "警告: ファイルが見つかりません。スキップします: $file" >&2; continue;
-    fi
-    if [ $(wc -l < "$file") -lt 2 ]; then
-        echo "警告: ファイルの行数が2行未満です。スキップします: $file" >&2; continue;
-    fi
+    if [ ! -f "$file" ]; then echo "警告: ファイルなし: $file" >&2; continue; fi
+    if [ $(wc -l < "$file") -lt 2 ]; then echo "警告: 行数不足: $file" >&2; continue; fi
 
-    # gawkを直接呼び出すことで、環境による差異をなくす
     gawk -v col="${COLUMN}" \
          -v patterns="${MATCH_STRINGS}" \
          -v listfile="${LIST_FILE}" \
@@ -73,21 +50,29 @@ for file in "$@"; do
         OFS = ","
         if (listfile != "") {
             while ((getline line < listfile) > 0) {
-                gsub(/^[ \t]+|[ \t]+$/, "", line)
-                if (line == "") continue
-                match_targets[line] = 1
+                gsub(/^[ \t]+|[ \t]+$/, "", line); if (line == "") continue; match_targets[line] = 1
             }
             close(listfile)
         } else if (patterns != "") {
-            split(patterns, pattern_array, ",")
-            for (p in pattern_array) {
-                match_targets[pattern_array[p]] = 1
-            }
+            split(patterns, pattern_array, ","); for (p in pattern_array) { match_targets[pattern_array[p]] = 1 }
         }
     }
     { lines[FNR] = $0 }
     END {
+        # --- ここからデバッグコード ---
+        print "--- DEBUG INFO ---" > "/dev/stderr"
+        print "File: " FILENAME > "/dev/stderr"
+        print "Total lines read in file: " FNR > "/dev/stderr"
+        print "Content of lines[1]: [" lines[1] "]" > "/dev/stderr"
         $0 = lines[1]
+        print "After parsing lines[1]:" > "/dev/stderr"
+        print "NF (Number of Fields): " NF > "/dev/stderr"
+        for (i=1; i<=NF; i++) {
+            print "  $ " i " = [" $i "]" > "/dev/stderr"
+        }
+        print "--- END DEBUG INFO ---" > "/dev/stderr"
+        # --- ここまでデバッグコード ---
+
         if ($2 != "TOP") {
             print "エラー: 1行目がTOPレコードではありません。ファイル:", FILENAME > "/dev/stderr"
             exit 1
