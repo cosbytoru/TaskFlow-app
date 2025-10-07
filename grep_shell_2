@@ -1,13 +1,9 @@
-[ftp_admin@d-mdm-frs01 suzuki_test]$ ./filter_csv_2.sh  -c 22 -f filter_list.txt test_small.csv
-エラー: 1行目がTOPレコードではありません。ファイル:,test_small.csv
-[ftp_admin@d-mdm-frs01 suzuki_test]$
-[ftp_admin@d-mdm-frs01 suzuki_test]$ cat ./filter_csv_2.sh
 #!/bin/bash
 
 #================================================================
-# CSVフィルタリングツール (最終解決版)
+# CSVフィルタリングツール (FPAT最終版)
 #
-# 依存関係: gawk (GNU Awk) - 必須
+# 依存関係: awk (gawk推奨ですが必須ではない)
 #================================================================
 
 # --- デフォルト設定 ---
@@ -45,13 +41,14 @@ for file in "$@"; do
     if [ ! -f "$file" ]; then echo "警告: ファイルなし: $file" >&2; continue; fi
     if [ $(wc -l < "$file") -lt 2 ]; then echo "警告: 行数不足: $file" >&2; continue; fi
 
-    # 【重要】LC_ALL=C を付けて gawk を実行し、ロケールの影響を完全に排除する
-    LC_ALL=C gawk -v col="${COLUMN}" \
-         -v patterns="${MATCH_STRINGS}" \
-         -v listfile="${LIST_FILE}" \
+    # gawkのCSV機能(PROCINFO)を使わず、FPATで手動解析する方式に変更
+    awk -v col="${COLUMN}" \
+        -v patterns="${MATCH_STRINGS}" \
+        -v listfile="${LIST_FILE}" \
     '
     BEGIN {
-        PROCINFO["csv"] = 1
+        # 堅牢なFPAT（フィールドパターン）を定義。空フィールドやクォート内のカンマも扱える。
+        FPAT = "\"[^\"]*\"|[^,]*"
         OFS = ","
         if (listfile != "") {
             while ((getline line < listfile) > 0) {
@@ -65,21 +62,31 @@ for file in "$@"; do
     { lines[FNR] = $0 }
     END {
         $0 = lines[1]
-        if ($2 != "TOP") {
+        # FPATではフィールド値にダブルクォートが含まれるため、比較の前に除去する
+        field2_top = $2
+        gsub(/^"|"$/, "", field2_top)
+        if (field2_top != "TOP") {
             print "エラー: 1行目がTOPレコードではありません。ファイル:", FILENAME > "/dev/stderr"
             exit 1
         }
+        
         $0 = lines[FNR]
-        if ($2 != "END") {
+        field2_end = $2
+        gsub(/^"|"$/, "", field2_end)
+        if (field2_end != "END") {
             print "エラー: 最終行がENDレコードではありません。ファイル:", FILENAME > "/dev/stderr"
             exit 1
         }
+
         print lines[1]
         data_counter = 0
         if (FNR > 2) {
             for (i = 2; i < FNR; i++) {
                 $0 = lines[i]
+                # フィルタリング対象のフィールドからもクォートを除去
                 field_to_check = $col
+                gsub(/^"|"$/, "", field_to_check)
+
                 if (field_to_check in match_targets) {
                     data_counter++
                     modified_line = lines[i]
@@ -95,7 +102,8 @@ for file in "$@"; do
     ' "$file"
 done
 
-[ftp_admin@d-mdm-frs01 suzuki_test]$
+
+
 
 #!/bin/bash
 
