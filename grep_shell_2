@@ -1,3 +1,7 @@
+[ftp_admin@d-mdm-frs01 suzuki_test]$ ./filter_csv_2.sh  -c 22 -f filter_list.txt test_small.csv
+エラー: 1行目がTOPレコードではありません。ファイル:,test_small.csv
+[ftp_admin@d-mdm-frs01 suzuki_test]$
+[ftp_admin@d-mdm-frs01 suzuki_test]$ cat ./filter_csv_2.sh
 #!/bin/bash
 
 #================================================================
@@ -91,8 +95,7 @@ for file in "$@"; do
     ' "$file"
 done
 
-
-
+[ftp_admin@d-mdm-frs01 suzuki_test]$
 
 #!/bin/bash
 
