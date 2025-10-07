@@ -19,6 +19,128 @@ along with this program. If not, see http://www.gnu.org/licenses/.
 #!/bin/bash
 
 #================================================================
+# CSVフィルタリングツール (gawk指定 最終版)
+#
+# 依存関係:
+#   gawk (GNU Awk) - 必須
+#================================================================
+
+# --- デフォルト設定 ---
+COLUMN=""
+MATCH_STRINGS=""
+LIST_FILE=""
+
+# --- ヘルプメッセージ表示関数 ---
+usage() {
+    echo "使用方法: $0 -c <列番号> {-s <文字列> | -f <リストファイル>} [file1.csv ...]"
+    echo "  -c <列番号>        : フィルタリング対象のカラム番号。必須。"
+    echo "  -s <文字列>        : 抽出する文字列をカンマ区切りで指定 (例: \"G111,G3333\")。"
+    echo "  -f <リストファイル> : 抽出する文字列を1行1件で記述したファイル。"
+    echo "  -h                 : このヘルプメッセージを表示する。"
+    exit 1
+}
+
+# --- オプション解析 ---
+while getopts "c:s:f:h" opt; do
+    case ${opt} in
+        c) COLUMN=${OPTARG};;
+        s) MATCH_STRINGS=${OPTARG};;
+        f) LIST_FILE=${OPTARG};;
+        h) usage;;
+        \?) usage;;
+    esac
+done
+shift $((OPTIND - 1))
+
+# --- 必須引数の検証 ---
+if [ -z "${COLUMN}" ]; then
+    echo "エラー: -c は必須オプションです。" >&2; usage;
+fi
+if [ -n "${MATCH_STRINGS}" ] && [ -n "${LIST_FILE}" ]; then
+    echo "エラー: -s と -f オプションは同時に指定できません。" >&2; usage;
+fi
+if [ -z "${MATCH_STRINGS}" ] && [ -z "${LIST_FILE}" ]; then
+    echo "エラー: -s または -f のどちらか一方を指定してください。" >&2; usage;
+fi
+if [ -n "${LIST_FILE}" ] && [ ! -f "${LIST_FILE}" ]; then
+    echo "エラー: リストファイルが見つかりません: ${LIST_FILE}" >&2; exit 1;
+fi
+if [ $# -eq 0 ]; then
+    echo "エラー: 処理対象のファイルが指定されていません。" >&2; usage;
+fi
+
+# --- メイン処理ループ ---
+for file in "$@"; do
+    if [ ! -f "$file" ]; then
+        echo "警告: ファイルが見つかりません。スキップします: $file" >&2; continue;
+    fi
+    if [ $(wc -l < "$file") -lt 2 ]; then
+        echo "警告: ファイルの行数が2行未満です。スキップします: $file" >&2; continue;
+    fi
+
+    # gawkを直接呼び出すことで、環境による差異をなくす
+    gawk -v col="${COLUMN}" \
+         -v patterns="${MATCH_STRINGS}" \
+         -v listfile="${LIST_FILE}" \
+    '
+    BEGIN {
+        PROCINFO["csv"] = 1
+        OFS = ","
+        if (listfile != "") {
+            while ((getline line < listfile) > 0) {
+                gsub(/^[ \t]+|[ \t]+$/, "", line)
+                if (line == "") continue
+                match_targets[line] = 1
+            }
+            close(listfile)
+        } else if (patterns != "") {
+            split(patterns, pattern_array, ",")
+            for (p in pattern_array) {
+                match_targets[pattern_array[p]] = 1
+            }
+        }
+    }
+    { lines[FNR] = $0 }
+    END {
+        $0 = lines[1]
+        if ($2 != "TOP") {
+            print "エラー: 1行目がTOPレコードではありません。ファイル:", FILENAME > "/dev/stderr"
+            exit 1
+        }
+        $0 = lines[FNR]
+        if ($2 != "END") {
+            print "エラー: 最終行がENDレコードではありません。ファイル:", FILENAME > "/dev/stderr"
+            exit 1
+        }
+        print lines[1]
+        data_counter = 0
+        if (FNR > 2) {
+            for (i = 2; i < FNR; i++) {
+                $0 = lines[i]
+                field_to_check = $col
+                if (field_to_check in match_targets) {
+                    data_counter++
+                    modified_line = lines[i]
+                    sub(/^"[^"]*"/, "\"" data_counter "\"", modified_line)
+                    print modified_line
+                }
+            }
+        }
+        total_records = 1 + data_counter + 1
+        end_counter = total_records - 1
+        printf "\"%d\",\"END\",\"%d\"\n", end_counter, total_records
+    }
+    ' "$file"
+done
+
+
+
+
+
+
+#!/bin/bash
+
+#================================================================
 # CSVフィルタリングツール (TOP/END, リストファイル, 複合CSV対応版)
 #
 # 説明:
