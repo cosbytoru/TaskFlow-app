@@ -1,3 +1,7 @@
+[ftp_admin@d-mdm-frs01 suzuki_test]$ grep '"1000409658"' VendorMaster_BP_list.txt
+[ftp_admin@d-mdm-frs01 suzuki_test]$ grep "1000409658" VendorMaster_BP_list.txt
+1000409658
+
 #!/bin/bash
 
 #================================================================
