@@ -1,4 +1,13 @@
-
+suzuki_test]$ ./filter_csv_debug.sh -c 22 -f filter_list.txt test_small.csv > /dev/null
+--- DEBUG INFO ---
+File: test_small.csv
+Total lines read in file: 101
+Content of lines[1]: ["0","TOP","232","20250916","0","00000","000","000",,,,]
+After parsing lines[1]:
+NF (Number of Fields): 1
+  $ 1 = ["0","TOP","232","20250916","0","00000","000","000",,,,]
+--- END DEBUG INFO ---
+エラー: 1行目がTOPレコードではありません。ファイル:,test_small.csv
 
 #!/bin/bash
 
